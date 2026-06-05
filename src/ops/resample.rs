@@ -7,6 +7,7 @@
 //! for anti-aliasing, as swscale does.
 
 use crate::image_buf::ImgF32;
+use rayon::prelude::*;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Filter {
@@ -137,45 +138,51 @@ fn resample_axis(
     let (dst_h, out_w, out_h) = if horizontal {
         (src_h, dst_w, src_h)
     } else {
-        (dst_w, src_w, dst_w) // when vertical, dst_w is the new height
+        (dst_w, src_w, dst_w)
     };
     let mut out = vec![0.0f32; out_w * out_h * 4];
     if horizontal {
-        for y in 0..src_h {
-            for x in 0..dst_w {
-                let c = &contribs[x];
-                let mut acc = [0.0f32; 4];
-                for (i, &w) in c.weights.iter().enumerate() {
-                    let sx = (c.start + i).min(src_w - 1);
-                    let si = (y * src_w + sx) * 4;
-                    acc[0] += src[si] * w;
-                    acc[1] += src[si + 1] * w;
-                    acc[2] += src[si + 2] * w;
-                    acc[3] += src[si + 3] * w;
+        let row_stride = dst_w * 4;
+        out.par_chunks_exact_mut(row_stride)
+            .enumerate()
+            .for_each(|(y, row_out)| {
+                for x in 0..dst_w {
+                    let c = &contribs[x];
+                    let mut acc = [0.0f32; 4];
+                    for (i, &w) in c.weights.iter().enumerate() {
+                        let sx = (c.start + i).min(src_w - 1);
+                        let si = (y * src_w + sx) * 4;
+                        acc[0] += src[si] * w;
+                        acc[1] += src[si + 1] * w;
+                        acc[2] += src[si + 2] * w;
+                        acc[3] += src[si + 3] * w;
+                    }
+                    let di = x * 4;
+                    row_out[di..di + 4].copy_from_slice(&acc);
                 }
-                let di = (y * dst_w + x) * 4;
-                out[di..di + 4].copy_from_slice(&acc);
-            }
-        }
+            });
     } else {
-        let new_h = dst_w; // contribs indexed by destination row
-        let _ = dst_h;
-        for y in 0..new_h {
-            let c = &contribs[y];
-            for x in 0..src_w {
-                let mut acc = [0.0f32; 4];
-                for (i, &w) in c.weights.iter().enumerate() {
-                    let sy = (c.start + i).min(src_h - 1);
-                    let si = (sy * src_w + x) * 4;
-                    acc[0] += src[si] * w;
-                    acc[1] += src[si + 1] * w;
-                    acc[2] += src[si + 2] * w;
-                    acc[3] += src[si + 3] * w;
+        let _new_h = dst_w;
+        let _dst_h = dst_h;
+        let row_stride = src_w * 4;
+        out.par_chunks_exact_mut(row_stride)
+            .enumerate()
+            .for_each(|(y, row_out)| {
+                let c = &contribs[y];
+                for x in 0..src_w {
+                    let mut acc = [0.0f32; 4];
+                    for (i, &w) in c.weights.iter().enumerate() {
+                        let sy = (c.start + i).min(src_h - 1);
+                        let si = (sy * src_w + x) * 4;
+                        acc[0] += src[si] * w;
+                        acc[1] += src[si + 1] * w;
+                        acc[2] += src[si + 2] * w;
+                        acc[3] += src[si + 3] * w;
+                    }
+                    let di = x * 4;
+                    row_out[di..di + 4].copy_from_slice(&acc);
                 }
-                let di = (y * src_w + x) * 4;
-                out[di..di + 4].copy_from_slice(&acc);
-            }
-        }
+            });
     }
     out
 }
@@ -206,13 +213,17 @@ pub fn nearest_scale(img: &ImgF32, fx: usize, fy: usize) -> ImgF32 {
     let nw = img.w * fx;
     let nh = img.h * fy;
     let mut out = ImgF32::new(nw, nh);
-    for y in 0..nh {
-        let sy = y / fy;
-        for x in 0..nw {
-            let sx = x / fx;
-            let p = img.get(sx, sy);
-            out.set(x, y, p);
-        }
-    }
+    let row_stride = nw * 4;
+    out.data.par_chunks_exact_mut(row_stride)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let sy = y / fy;
+            for x in 0..nw {
+                let sx = x / fx;
+                let p = img.get(sx, sy);
+                let di = x * 4;
+                row[di..di + 4].copy_from_slice(&p);
+            }
+        });
     out
 }

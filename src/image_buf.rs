@@ -49,12 +49,13 @@ impl ImgF32 {
     }
 
     /// Apply a per-channel function to R,G,B (alpha untouched).
-    pub fn map_rgb<F: Fn(f32) -> f32>(&mut self, f: F) {
-        for px in self.data.chunks_exact_mut(4) {
+    pub fn map_rgb<F: Fn(f32) -> f32 + Send + Sync>(&mut self, f: F) {
+        use rayon::prelude::*;
+        self.data.par_chunks_exact_mut(4).for_each(|px| {
             px[0] = f(px[0]);
             px[1] = f(px[1]);
             px[2] = f(px[2]);
-        }
+        });
     }
 
     /// Load an image file as RGBA f32 (0..1). 8- and 16-bit sources are both

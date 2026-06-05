@@ -6,6 +6,7 @@
 //! independent (the script often blurs more horizontally than vertically).
 
 use crate::image_buf::ImgF32;
+use rayon::prelude::*;
 
 fn kernel(sigma: f64) -> Vec<f32> {
     let radius = (sigma * 3.0).ceil().max(1.0) as i64;
@@ -26,38 +27,46 @@ fn kernel(sigma: f64) -> Vec<f32> {
 fn blur_h(img: &ImgF32, k: &[f32]) -> ImgF32 {
     let r = (k.len() / 2) as i64;
     let mut out = ImgF32::new(img.w, img.h);
-    for y in 0..img.h {
-        for x in 0..img.w {
-            let mut acc = [0.0f32; 4];
-            for (j, &w) in k.iter().enumerate() {
-                let sx = (x as i64 + j as i64 - r).clamp(0, img.w as i64 - 1) as usize;
-                let p = img.get(sx, y);
-                for c in 0..4 {
-                    acc[c] += p[c] * w;
+    let row_stride = img.w * 4;
+    out.data.par_chunks_exact_mut(row_stride)
+        .enumerate()
+        .for_each(|(y, row_out)| {
+            for x in 0..img.w {
+                let mut acc = [0.0f32; 4];
+                for (j, &w) in k.iter().enumerate() {
+                    let sx = (x as i64 + j as i64 - r).clamp(0, img.w as i64 - 1) as usize;
+                    let p = img.get(sx, y);
+                    for c in 0..4 {
+                        acc[c] += p[c] * w;
+                    }
                 }
+                let di = x * 4;
+                row_out[di..di + 4].copy_from_slice(&acc);
             }
-            out.set(x, y, acc);
-        }
-    }
+        });
     out
 }
 
 fn blur_v(img: &ImgF32, k: &[f32]) -> ImgF32 {
     let r = (k.len() / 2) as i64;
     let mut out = ImgF32::new(img.w, img.h);
-    for y in 0..img.h {
-        for x in 0..img.w {
-            let mut acc = [0.0f32; 4];
-            for (j, &w) in k.iter().enumerate() {
-                let sy = (y as i64 + j as i64 - r).clamp(0, img.h as i64 - 1) as usize;
-                let p = img.get(x, sy);
-                for c in 0..4 {
-                    acc[c] += p[c] * w;
+    let row_stride = img.w * 4;
+    out.data.par_chunks_exact_mut(row_stride)
+        .enumerate()
+        .for_each(|(y, row_out)| {
+            for x in 0..img.w {
+                let mut acc = [0.0f32; 4];
+                for (j, &w) in k.iter().enumerate() {
+                    let sy = (y as i64 + j as i64 - r).clamp(0, img.h as i64 - 1) as usize;
+                    let p = img.get(x, sy);
+                    for c in 0..4 {
+                        acc[c] += p[c] * w;
+                    }
                 }
+                let di = x * 4;
+                row_out[di..di + 4].copy_from_slice(&acc);
             }
-            out.set(x, y, acc);
-        }
-    }
+        });
     out
 }
 

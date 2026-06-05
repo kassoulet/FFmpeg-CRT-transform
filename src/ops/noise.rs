@@ -6,6 +6,7 @@
 //! random source. `seed` matches the script's `all_seed=5150`.
 
 use crate::image_buf::ImgF32;
+use rayon::prelude::*;
 
 #[inline]
 fn hash(mut x: u64) -> u64 {
@@ -29,12 +30,16 @@ fn rand01(seed: u64, x: usize, y: usize) -> f32 {
 pub fn gray_noise(w: usize, h: usize, seed: u64, strength: f64) -> ImgF32 {
     let amp = (strength / 255.0) as f32;
     let mut img = ImgF32::new(w, h);
-    for y in 0..h {
-        for x in 0..w {
-            let n = (rand01(seed, x, y) - 0.5) * 2.0 * amp;
-            let v = (0.5 + n).clamp(0.0, 1.0);
-            img.set(x, y, [v, v, v, 1.0]);
-        }
-    }
+    let row_stride = w * 4;
+    img.data.par_chunks_exact_mut(row_stride)
+        .enumerate()
+        .for_each(|(y, row)| {
+            for x in 0..w {
+                let n = (rand01(seed, x, y) - 0.5) * 2.0 * amp;
+                let v = (0.5 + n).clamp(0.0, 1.0);
+                let di = x * 4;
+                row[di..di + 4].copy_from_slice(&[v, v, v, 1.0]);
+            }
+        });
     img
 }
