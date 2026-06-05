@@ -1,0 +1,116 @@
+//! Procedural generators + simple pointwise image adjustments.
+//!
+//! Covers the bits the script synthesizes with `geq`/`lutrgb`: rounded-corner
+//! masks, the scanline luminance column, the flat-panel pixel grid, plus the
+//! grayscale / blackpoint / brighten / negate point ops.
+
+use crate::image_buf::ImgF32;
+
+/// Stamp black rounded corners onto a (white) bezel canvas: a quarter circle of
+/// `radius` in each corner; pixels outside the circle become black. Mirrors the
+/// script's `geq lum=if((X-W)^2+(Y-H)^2 <= r^2 ...)` corner build.
+pub fn round_corners(img: &mut ImgF32, radius: usize) {
+    if radius == 0 || radius * 2 > img.w || radius * 2 > img.h {
+        return;
+    }
+    let r = radius as f64;
+    let r2 = r * r;
+    // four corner centers (cx, cy) are the inner points of each rounded corner
+    let corners = [
+        (r, r),                                  // top-left
+        (img.w as f64 - r, r),                   // top-right
+        (r, img.h as f64 - r),                   // bottom-left
+        (img.w as f64 - r, img.h as f64 - r),    // bottom-right
+    ];
+    for (ci, &(cx, cy)) in corners.iter().enumerate() {
+        let (x0, x1, y0, y1) = match ci {
+            0 => (0, radius, 0, radius),
+            1 => (img.w - radius, img.w, 0, radius),
+            2 => (0, radius, img.h - radius, img.h),
+            _ => (img.w - radius, img.w, img.h - radius, img.h),
+        };
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let dx = x as f64 + 0.5 - cx;
+                let dy = y as f64 + 0.5 - cy;
+                if dx * dx + dy * dy > r2 {
+                    img.set(x, y, [0.0, 0.0, 0.0, 1.0]);
+                }
+            }
+        }
+    }
+}
+
+/// One-column scanline luminance profile, `period` pixels tall:
+/// `lum = pow(sin(Y*PI/period), 1/weight)` for the first `period` rows.
+pub fn scanline_column(period: usize, weight: f64) -> ImgF32 {
+    let mut img = ImgF32::new(1, period.max(1));
+    for y in 0..period {
+        let s = (y as f64 * std::f64::consts::PI / period as f64).sin().max(0.0);
+        let lum = s.powf(1.0 / weight) as f32;
+        img.set(0, y, [lum, lum, lum, 1.0]);
+    }
+    img
+}
+
+/// Flat-panel pixel grid at native (SXINT x PY) resolution. Gap cells get
+/// `lum_gap`, pixel cells get `lum_px` (both 0..1). `gx`/`gy` are the cell
+/// pitch; `gap_x`/`gap_y` the gap width within each cell.
+pub fn pixel_grid(
+    w: usize,
+    h: usize,
+    gx: usize,
+    gy: usize,
+    gap_x: usize,
+    gap_y: usize,
+    lum_gap: f32,
+    lum_px: f32,
+) -> ImgF32 {
+    let mut img = ImgF32::new(w, h);
+    let gx = gx.max(1);
+    let gy = gy.max(1);
+    for y in 0..h {
+        let in_gap_y = gy >= gap_y && (y % gy) >= gx_sub(gy, gap_y);
+        for x in 0..w {
+            let in_gap_x = gx >= gap_x && (x % gx) >= gx_sub(gx, gap_x);
+            let lum = if in_gap_x || in_gap_y { lum_gap } else { lum_px };
+            img.set(x, y, [lum, lum, lum, 1.0]);
+        }
+    }
+    img
+}
+
+#[inline]
+fn gx_sub(a: usize, b: usize) -> usize {
+    a.saturating_sub(b)
+}
+
+/// Rec.601 luma, written back to all three channels (the `format=gray` step).
+pub fn to_gray(img: &mut ImgF32) {
+    for px in img.data.chunks_exact_mut(4) {
+        let l = 0.299 * px[0] + 0.587 * px[1] + 0.114 * px[2];
+        px[0] = l;
+        px[1] = l;
+        px[2] = l;
+    }
+}
+
+/// Blackpoint lift: `val + (bp*256/65535)*(1-val)`, bp in 0..255.
+pub fn blackpoint(img: &mut ImgF32, bp: f64) {
+    let k = (bp * 256.0 / 65535.0) as f32;
+    if k == 0.0 {
+        return;
+    }
+    img.map_rgb(|v| v + k * (1.0 - v));
+}
+
+/// Brightness multiply with clamp to 0..1 (`clip(val*brighten, 0, max)`).
+pub fn brighten(img: &mut ImgF32, mult: f64) {
+    let m = mult as f32;
+    img.map_rgb(|v| (v * m).clamp(0.0, 1.0));
+}
+
+/// Invert RGB (`negate`).
+pub fn negate(img: &mut ImgF32) {
+    img.map_rgb(|v| 1.0 - v);
+}
