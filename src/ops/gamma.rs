@@ -1,0 +1,27 @@
+//! Gamma conversion — the `lutrgb gammaval(2.2)` / `gammaval(0.454545)` dance.
+//!
+//! On normalized 0..1 values, ffmpeg's `gammaval(g)` is simply `x^g`. The script
+//! processes spatial filters in a pseudo-linear space (`^2.2`) and converts back
+//! (`^(1/2.2)`) before the gamma-space blends.
+
+use crate::image_buf::ImgF32;
+
+pub const TO_LINEAR: f32 = 2.2;
+pub const FROM_LINEAR: f32 = 0.454_545_45;
+
+pub fn to_linear(img: &mut ImgF32) {
+    img.map_rgb(|x| x.max(0.0).powf(TO_LINEAR));
+}
+
+pub fn from_linear(img: &mut ImgF32) {
+    img.map_rgb(|x| x.max(0.0).powf(FROM_LINEAR));
+}
+
+/// The halation branch's combined "revert gamma + slight contrast" lut:
+/// `clip(gammaval(0.454545)*(258/256) - 2*256, 0, max)` evaluated in 16-bit
+/// space, expressed on normalized values.
+pub fn from_linear_halation(img: &mut ImgF32) {
+    let scale = 258.0 / 256.0;
+    let offset = 512.0 / 65535.0; // 2*256 out of the 16-bit max
+    img.map_rgb(|x| (x.max(0.0).powf(FROM_LINEAR) * scale - offset).clamp(0.0, 1.0));
+}
