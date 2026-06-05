@@ -8,6 +8,7 @@
 //! samples are black, matching the script's "pad black, distort, crop" trick.
 
 use crate::image_buf::ImgF32;
+use rayon::prelude::*;
 
 fn sample_bilinear(img: &ImgF32, fx: f64, fy: f64) -> [f32; 4] {
     if fx < 0.0 || fy < 0.0 || fx > (img.w - 1) as f64 || fy > (img.h - 1) as f64 {
@@ -44,17 +45,22 @@ pub fn lenscorrection(img: &ImgF32, k1: f64, k2: f64) -> ImgF32 {
     let cy = h / 2.0;
     let half_diag = (cx * cx + cy * cy).sqrt();
     let mut out = ImgF32::new(img.w, img.h);
-    for y in 0..img.h {
-        let dy = y as f64 + 0.5 - cy;
-        for x in 0..img.w {
-            let dx = x as f64 + 0.5 - cx;
-            let dn = (dx * dx + dy * dy).sqrt() / half_diag;
-            let r2 = dn * dn;
-            let mult = 1.0 + k1 * r2 + k2 * r2 * r2;
-            let sx = cx + dx * mult - 0.5;
-            let sy = cy + dy * mult - 0.5;
-            out.set(x, y, sample_bilinear(img, sx, sy));
-        }
-    }
+    let row_stride = img.w * 4;
+    out.data.par_chunks_exact_mut(row_stride)
+        .enumerate()
+        .for_each(|(y, row_out)| {
+            let dy = y as f64 + 0.5 - cy;
+            for x in 0..img.w {
+                let dx = x as f64 + 0.5 - cx;
+                let dn = (dx * dx + dy * dy).sqrt() / half_diag;
+                let r2 = dn * dn;
+                let mult = 1.0 + k1 * r2 + k2 * r2 * r2;
+                let sx = cx + dx * mult - 0.5;
+                let sy = cy + dy * mult - 0.5;
+                let p = sample_bilinear(img, sx, sy);
+                let di = x * 4;
+                row_out[di..di + 4].copy_from_slice(&p);
+            }
+        });
     out
 }

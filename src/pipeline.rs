@@ -21,6 +21,7 @@ use crate::ops::{
     resample::{self, Filter},
     vignette,
 };
+use rayon::prelude::*;
 
 /// Bundle of everything the stages read, resolved once.
 struct Ctx {
@@ -151,12 +152,16 @@ fn build_scanlines(ctx: &Ctx) -> ImgF32 {
     let px = ctx.d.px as usize;
     let py = ctx.d.py as usize;
     let mut s = ImgF32::new(px, py);
-    for y in 0..py {
-        let lum = col.get(0, y % period);
-        for x in 0..px {
-            s.set(x, y, lum);
-        }
-    }
+    let row_stride = px * 4;
+    s.data.par_chunks_exact_mut(row_stride)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let lum = col.get(0, y % period);
+            for x in 0..px {
+                let di = x * 4;
+                row[di..di + 4].copy_from_slice(&lum);
+            }
+        });
     // Soften + apply CRT curvature (script supersamples x3 for quality; we blur
     // at native res, see CLAUDE.md fidelity notes).
     s = blur::gblur_iso(&s, 0.8);
@@ -189,13 +194,18 @@ fn build_shadowmask(ctx: &Ctx) -> Result<ImgF32> {
 
     // tile to cover PXxPY
     let mut tiled = ImgF32::new(px, py);
-    for y in 0..py {
-        let sy = y % mh;
-        for x in 0..px {
-            let sx = x % mw;
-            tiled.set(x, y, mask.get(sx, sy));
-        }
-    }
+    let row_stride = px * 4;
+    tiled.data.par_chunks_exact_mut(row_stride)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let sy = y % mh;
+            for x in 0..px {
+                let sx = x % mw;
+                let p = mask.get(sx, sy);
+                let di = x * 4;
+                row[di..di + 4].copy_from_slice(&p);
+            }
+        });
     tiled = blur::gblur_iso(&tiled, 1.0);
     if ctx.d.crt_curvature != 0.0 {
         tiled = lens::lenscorrection(&tiled, ctx.d.crt_curvature, ctx.d.crt_curvature);
@@ -372,11 +382,20 @@ fn output(ctx: &Ctx, step03: ImgF32) -> Result<ImgF32> {
     let mut out = ImgF32::filled(ctx.d.ox as usize, ctx.d.oy as usize, [0.0, 0.0, 0.0, 1.0]);
     let ox0 = (out.w.saturating_sub(cur.w)) / 2;
     let oy0 = (out.h.saturating_sub(cur.h)) / 2;
-    for y in 0..cur.h.min(out.h) {
-        for x in 0..cur.w.min(out.w) {
-            out.set(ox0 + x, oy0 + y, cur.get(x, y));
-        }
-    }
+    let copy_h = cur.h.min(out.h);
+    let copy_w = cur.w.min(out.w);
+    out.data.par_chunks_exact_mut(out.w * 4)
+        .skip(oy0)
+        .take(copy_h)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let cy = y;
+            for x in 0..copy_w {
+                let p = cur.get(x, cy);
+                let di = (ox0 + x) * 4;
+                row[di..di + 4].copy_from_slice(&p);
+            }
+        });
 
     // texture overlay (paper / lcdgrain)
     match ctx.mon.texture {
@@ -418,7 +437,7 @@ fn apply_paper(ctx: &Ctx, out: &mut ImgF32) {
     let papery = ((ctx.d.oy as f64 * 67.0 / 100.0) as usize).max(1);
     let mut tex = noise::gray_noise(paperx, papery, 5150, 100.0);
     // contrast stretch ((v-70/255)*255/115) and 3-tone palette
-    for px in tex.data.chunks_exact_mut(4) {
+    tex.data.par_chunks_exact_mut(4).for_each(|px| {
         let v = ((px[0] - 70.0 / 255.0) * 255.0 / 115.0).clamp(0.0, 1.0);
         let band = (v * 255.0) as i32;
         let (r, g, b) = if band <= 101 {
@@ -431,7 +450,7 @@ fn apply_paper(ctx: &Ctx, out: &mut ImgF32) {
         px[0] = r / 255.0;
         px[1] = g / 255.0;
         px[2] = b / 255.0;
-    }
+    });
     gamma::to_linear(&mut tex);
     let mut tex = resample::resize(&tex, out.w, out.h, Filter::Bilinear);
     tex = blur::gblur_iso(&tex, 3.0);

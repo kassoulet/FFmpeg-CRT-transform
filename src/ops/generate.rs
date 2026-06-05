@@ -5,6 +5,7 @@
 //! grayscale / blackpoint / brighten / negate point ops.
 
 use crate::image_buf::ImgF32;
+use rayon::prelude::*;
 
 /// Stamp black rounded corners onto a (white) bezel canvas: a quarter circle of
 /// `radius` in each corner; pixels outside the circle become black. Mirrors the
@@ -69,14 +70,18 @@ pub fn pixel_grid(
     let mut img = ImgF32::new(w, h);
     let gx = gx.max(1);
     let gy = gy.max(1);
-    for y in 0..h {
-        let in_gap_y = gy >= gap_y && (y % gy) >= gx_sub(gy, gap_y);
-        for x in 0..w {
-            let in_gap_x = gx >= gap_x && (x % gx) >= gx_sub(gx, gap_x);
-            let lum = if in_gap_x || in_gap_y { lum_gap } else { lum_px };
-            img.set(x, y, [lum, lum, lum, 1.0]);
-        }
-    }
+    let row_stride = w * 4;
+    img.data.par_chunks_exact_mut(row_stride)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let in_gap_y = gy >= gap_y && (y % gy) >= gx_sub(gy, gap_y);
+            for x in 0..w {
+                let in_gap_x = gx >= gap_x && (x % gx) >= gx_sub(gx, gap_x);
+                let lum = if in_gap_x || in_gap_y { lum_gap } else { lum_px };
+                let di = x * 4;
+                row[di..di + 4].copy_from_slice(&[lum, lum, lum, 1.0]);
+            }
+        });
     img
 }
 
@@ -87,12 +92,12 @@ fn gx_sub(a: usize, b: usize) -> usize {
 
 /// Rec.601 luma, written back to all three channels (the `format=gray` step).
 pub fn to_gray(img: &mut ImgF32) {
-    for px in img.data.chunks_exact_mut(4) {
+    img.data.par_chunks_exact_mut(4).for_each(|px| {
         let l = 0.299 * px[0] + 0.587 * px[1] + 0.114 * px[2];
         px[0] = l;
         px[1] = l;
         px[2] = l;
-    }
+    });
 }
 
 /// Blackpoint lift: `val + (bp*256/65535)*(1-val)`, bp in 0..255.

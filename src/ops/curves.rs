@@ -6,6 +6,7 @@
 //! evaluate the spline directly on the float input.
 
 use crate::image_buf::ImgF32;
+use rayon::prelude::*;
 
 /// One channel's control points, as a natural cubic spline ready to evaluate.
 pub struct Spline {
@@ -103,10 +104,10 @@ impl Curves {
     }
 
     pub fn apply(&self, img: &mut ImgF32) {
-        for px in img.data.chunks_exact_mut(4) {
+        img.data.par_chunks_exact_mut(4).for_each(|px| {
             px[0] = self.r.eval(px[0] as f64) as f32;
             px[1] = self.g.eval(px[1] as f64) as f32;
             px[2] = self.b.eval(px[2] as f64) as f32;
-        }
+        });
     }
 }
