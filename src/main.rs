@@ -36,6 +36,7 @@ fn derive_output(config: &Path, input: &Path) -> Result<PathBuf> {
 }
 
 fn main() -> Result<()> {
+    profiling::register_thread!("Main Thread");
     let cli = Cli::parse();
 
     if !cli.config_file.is_file() {

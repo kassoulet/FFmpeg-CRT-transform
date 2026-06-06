@@ -1,11 +1,9 @@
-//! Benchmarks for individual DSP operations.
+//! Benchmarks for individual DSP operations using Criterion.
 //!
-//! Run with nightly Rust:
-//!   rustup run nightly cargo bench
-//!
-//! Or with criterion (stable):
+//! Run with:
 //!   cargo bench
 
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use ffcrt::image_buf::ImgF32;
 use ffcrt::ops::{blur, lens, resample};
 
@@ -17,32 +15,33 @@ fn img_large() -> ImgF32 {
     ImgF32::filled(3200, 2400, [0.5, 0.5, 0.5, 1.0])
 }
 
-#[cfg(feature = "bench")]
-mod bench {
-    use super::*;
-    use test::Bencher;
+fn bench_blur(c: &mut Criterion) {
+    let mut group = c.benchmark_group("blur");
+    let small = img_small();
+    group.bench_function("iso_small", |b| {
+        b.iter(|| blur::gblur_iso(black_box(&small), 3.0))
+    });
 
-    #[bench]
-    fn blur_iso_small(b: &mut Bencher) {
-        let img = img_small();
-        b.iter(|| blur::gblur_iso(&img, 3.0));
-    }
-
-    #[bench]
-    fn blur_iso_large(b: &mut Bencher) {
-        let img = img_large();
-        b.iter(|| blur::gblur_iso(&img, 3.0));
-    }
-
-    #[bench]
-    fn lenscorrection_small(b: &mut Bencher) {
-        let img = img_small();
-        b.iter(|| lens::lenscorrection(&img, 0.06, 0.06));
-    }
-
-    #[bench]
-    fn resize_lanczos_down(b: &mut Bencher) {
-        let img = img_small();
-        b.iter(|| resample::resize(&img, 320, 240, resample::Filter::Lanczos));
-    }
+    let large = img_large();
+    group.bench_function("iso_large", |b| {
+        b.iter(|| blur::gblur_iso(black_box(&large), 3.0))
+    });
+    group.finish();
 }
+
+fn bench_lens(c: &mut Criterion) {
+    let img = img_small();
+    c.bench_function("lens_small", |b| {
+        b.iter(|| lens::lenscorrection(black_box(&img), 0.06, 0.06))
+    });
+}
+
+fn bench_resize(c: &mut Criterion) {
+    let img = img_small();
+    c.bench_function("resize_lanczos_down", |b| {
+        b.iter(|| resample::resize(black_box(&img), 320, 240, resample::Filter::Lanczos))
+    });
+}
+
+criterion_group!(benches, bench_blur, bench_lens, bench_resize);
+criterion_main!(benches);

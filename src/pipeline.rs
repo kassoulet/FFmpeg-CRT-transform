@@ -137,6 +137,7 @@ pub fn run(
 // ---------------------------------------------------------------------------
 // Stage: bezel  (white canvas + rounded corners + bezel curvature)
 // ---------------------------------------------------------------------------
+#[profiling::function]
 fn build_bezel(ctx: &Ctx) -> ImgF32 {
     let mut bezel = ImgF32::filled(ctx.d.px as usize, ctx.d.py as usize, [1.0, 1.0, 1.0, 1.0]);
     let radius = ctx.cfg.i64_or("CORNER_RADIUS", 0).max(0) as usize;
@@ -150,6 +151,7 @@ fn build_bezel(ctx: &Ctx) -> ImgF32 {
 // ---------------------------------------------------------------------------
 // Stage: scanlines  (sin^(1/weight) profile, tiled to PXxPY, blur + curvature)
 // ---------------------------------------------------------------------------
+#[profiling::function]
 fn build_scanlines(ctx: &Ctx) -> ImgF32 {
     let weight = ctx.cfg.f64_or("SL_WEIGHT", 0.5).max(1e-3);
     // SCANLINE_PERIOD = PRESCALE_BY / SCAN_FACTOR (bc integer truncation).
@@ -184,6 +186,7 @@ fn build_scanlines(ctx: &Ctx) -> ImgF32 {
 // ---------------------------------------------------------------------------
 // Stage: shadowmask overlay  (tile the _<type>.png mask, blur + curvature)
 // ---------------------------------------------------------------------------
+#[profiling::function]
 fn build_shadowmask(ctx: &Ctx) -> Result<ImgF32> {
     let px = ctx.d.px as usize;
     let py = ctx.d.py as usize;
@@ -229,6 +232,7 @@ fn build_shadowmask(ctx: &Ctx) -> Result<ImgF32> {
 // ---------------------------------------------------------------------------
 // Stage: flat-panel pixel grid  (gap pattern, gamma, scaled to PX wide)
 // ---------------------------------------------------------------------------
+#[profiling::function]
 fn build_grid(ctx: &Ctx) -> ImgF32 {
     let pxgrid_alpha = ctx.cfg.f64_or("PXGRID_ALPHA", 0.0) as f32;
     let (lum_gap, lum_px) = if ctx.mon.pxgrid_invert {
