@@ -2,3 +2,8 @@
 /target
 Cargo.lock
 TMP*
+# test / benchmark output artifacts
+test-suite/*-out.png
+test-suite/*-ff-out.png
+test-suite/*-rust-out.png
+test-suite/*-OLD.*
