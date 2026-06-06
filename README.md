@@ -1,39 +1,114 @@
-# FFmpeg CRT Transform
+# ffcrt — native-Rust CRT / flat-panel monitor simulation
 
-Windows batch script for a configurable simulation of CRT monitors (and some older flat-panel displays too), given an input image/video.<br>
-Requires a *git-master* build of FFmpeg from **2021-01-27** or newer, due to a couple of bugfixes and new features.<br>
-See https://github.com/viler-int10h/FFmpeg-CRT-transform/ for the latest version.
+A fast, configurable simulation of CRT monitors and older flat-panel displays,
+applied to still images. Written in pure Rust with **no external dependencies**
+— no FFmpeg required.
 
-## Usage and Configuration
+```
+cargo run --release -- presets/color-PAL-TV.cfg input.png output.png
+```
 
-Syntax: ```ffcrt <config_file> <input_file> [output_file]```  
+## Features
 
-- ```input_file``` must be a valid image or video.  Assumed to be 24-bit RGB (8 bits/channel).  
+- **Color CRTs** — shadow mask (triad / slot / grille), scanlines, bloom, halation, CRT curvature
+- **Monochrome CRTs** — amber, green, white, P7 phosphor, paperwhite, and more, with tint curves
+- **Flat-panel displays** — LCD, plasma, ELD with pixel grid, substrate grain
+- **16 configurable presets** in `presets/`, with commented parameters
+- **Per-row parallelism** via rayon — 3–11× faster than the original FFmpeg pipeline
+- **Debug output** via `--dump-stages <dir>` to inspect each pipeline step
 
-- If ```output_file``` is omitted, the output will be named "(input_file)_(config_file).(input_ext)".
+## Quick start
 
-- **How to configure**: all settings/parameters are commented in the sample configuration files, which you can find in the "presets" subdir.<br>**NOTE**: the included presets aren't guaranteed to accurately simulate any particular monitor model, but they may give you a good starting point!
+```bash
+# Build (release)
+cargo build --release
 
-## Tips
+# Run on a test image with a color CRT preset
+./target/release/ffcrt presets/color-PAL-TV.cfg test-suite/08.png /tmp/out.png
 
-- Input is expected to have the same resolution (=*storage* aspect ratio, SAR) of the video mode you are simulating, including overscan if any.
-- The aspect ratio **of the simulated screen** (=*display* aspect ratio, DAR) is not set directly, but depends on the SAR and on the *pixel* aspect ratio (PAR):  DAR=SAR�PAR.  The PAR is set with the ```PX_ASPECT``` parameter.
-- The aspect ratio **of your final output** is set separately with the ```OASPECT``` parameter.  If it's different from the above, the simulated screen will be scaled and padded as necessary while maintaining its aspect ratio, so you can have e.g. a 4:3 screen centered in a 16:9 video.
+# Debug each pipeline stage
+./target/release/ffcrt --dump-stages /tmp/stages presets/color-PAL-TV.cfg test-suite/08.png /tmp/out.png
+```
 
-- Processing speed and quality is determined by the ```PRESCALE_BY``` setting.  This also affects FFmpeg's RAM consumption, so if you get memory allocation errors try a lower factor.
-- *Most* of the processing chain uses a color depth of 8 bits/component by default.  Setting ```16BPC_PROCESSING``` to ```yes``` will make all the intermediate steps use 16 instead.  That makes the process twice as slow and RAM-hungry, but if your settings are giving you prominent banding artifacts and such, try going 16-bit.
-- By default the output colorspace is 24-bit RGB (8 bits/component), but you can change that by setting ```OFORMAT``` to 1: for videos, this will output YUV 4:4:4 at 10 bits/component.  For images, you'll get 48-bit RGB (16 bits/component), which works with .png or .tif for instance.<br>
-(Of course, to get the most out of this, you'll want 16bpc processing as mentioned above)
+## Usage
 
-- In general, speed is the weakest link in this whole thing, so you may want to test your config file on a still .png image (or on a few seconds of video) first, tweak things to your liking, and tackle longer videos only after you've finalized your settings.
+```
+ffcrt <config.cfg> <input_image> [output_image]
+```
 
-## Write-ups, videos, sample images
+- `<config.cfg>` — a configuration file (see `presets/` for examples).
+- `<input_image>` — a still image (PNG, JPG, TIF, BMP).
+- `[output_image]` — optional; defaults to `(input)_(config).(ext)`.
 
-1. **Color CRTs:** https://int10h.org/blog/2021/01/simulating-crt-monitors-ffmpeg-pt-1-color/<br><br>
-<a href="https://int10h.org/blog/2021/01/simulating-crt-monitors-ffmpeg-pt-1-color/"><img src="../images/r01s.png?raw=true" height="480"> </a>
+**Video input** is not yet supported (Phase B, planned).
 
-2. **Monochrome CRTs:** https://int10h.org/blog/2021/02/simulating-crt-monitors-ffmpeg-pt-2-monochrome/<br><br>
-<a href="https://int10h.org/blog/2021/02/simulating-crt-monitors-ffmpeg-pt-2-monochrome/"><img src="../images/r02s.png?raw=true" height="480"> </a>
+## Configuration
 
-3. **Flat-Panel Displays:** https://int10h.org/blog/2021/03/simulating-non-crt-monitors-ffmpeg-flat-panels/<br><br>
-<a href="https://int10h.org/blog/2021/03/simulating-non-crt-monitors-ffmpeg-flat-panels/"><img src="../images/r03s.png?raw=true" height="480"> </a>
+All parameters are documented inline in the sample `.cfg` files under `presets/`.
+Key settings:
+
+| Parameter | Effect |
+|-----------|--------|
+| `PRESCALE_BY` | Integer prescale factor (higher = sharper but slower) |
+| `MONITOR_COLOR` | `rgb` for color, or a monochrome type (amber, green1, p7, ...) |
+| `OVL_TYPE` | Shadow mask shape: `triad`, `slot`, or `grille` |
+| `SCANLINES_ON` / `SL_WEIGHT` | Scanline effect thickness and intensity |
+| `HALATION_ON` / `HALATION_RADIUS` | Glow around bright areas |
+| `CRT_CURVATURE` | Barrel distortion for curved CRT surfaces |
+| `FLAT_PANEL` / `PXGRID_ALPHA` | Flat-panel grid overlay |
+| `OFORMAT` | Output depth: `0` = 8-bit RGB, `1` = 16-bit RGB |
+
+## Project structure
+
+```
+Cargo.toml           # Crate metadata + dependencies
+src/
+  lib.rs             # Public API: ffcrt::run, ffcrt::ImgF32, ffcrt::Config
+  main.rs            # CLI binary (thin wrapper over the library)
+  config.rs          # .cfg parser
+  image_buf.rs       # ImgF32 — universal f32 work buffer
+  monitor.rs         # MONITOR_COLOR table + tint curves
+  pipeline.rs        # Pipeline orchestrator (9 stages)
+  ops/               # DSP primitives (blur, blend, resample, lens, ...)
+presets/              # 16 sample configuration files
+test-suite/           # Test inputs + configs for regression checking
+tests/                # Integration tests
+benches/              # Benchmarks (requires nightly)
+examples/             # Library usage examples
+```
+
+## Performance
+
+On a Ryzen 5 5600G (6 cores / 12 threads):
+
+| Test | FFmpeg (reference) | Rust (single-thread) | Rust (rayon) | vs FFmpeg |
+|------|-------------------|---------------------|-------------|-----------|
+| Color CRT (640×480) | 10.6 s | 3.1 s | **0.92 s** | **11.5× faster** |
+| Paperwhite (640×480) | 9.7 s | 13.6 s | **2.58 s** | **3.8× faster** |
+| Amber (800×416) | 9.3 s | 11.6 s | **2.54 s** | **3.7× faster** |
+
+See `benchmark.md` for detailed results.
+
+## Background
+
+This is a native-Rust port of [VileR's FFmpeg-CRT-transform](https://github.com/viler-int10h/FFmpeg-CRT-transform/)
+scripts. The original shell/batch scripts drive FFmpeg through ~9 sequential
+invocations with intermediate temp files. The Rust port reimplements the same
+pipeline as pure-Rust DSP — same `.cfg` presets, perceptually equivalent output,
+3–11× faster.
+
+### Reference scripts
+
+The original `ffcrt.sh` and `ffcrt.bat` are kept in the repository as a
+behavioural specification. They require a git-master FFmpeg build from
+2021-01-27 or newer.
+
+### Blog write-ups (by VileR)
+
+1. [Simulating CRT Monitors (color)](https://int10h.org/blog/2021/01/simulating-crt-monitors-ffmpeg-pt-1-color/)
+2. [Simulating CRT Monitors (monochrome)](https://int10h.org/blog/2021/02/simulating-crt-monitors-ffmpeg-pt-2-monochrome/)
+3. [Simulating Flat-Panel Displays](https://int10h.org/blog/2021/03/simulating-non-crt-monitors-ffmpeg-flat-panels/)
+
+## License
+
+MIT OR Apache-2.0

@@ -1,18 +1,12 @@
 //! `ffcrt` — native-Rust CRT / flat-panel monitor simulation.
 //!
-//! A port of the `ffcrt.sh` / `ffcrt.bat` FFmpeg pipeline to native Rust DSP.
-//! Phase A (still images) is implemented end-to-end with no external binary.
-//! Video (Phase B) is not yet wired up. The `.cfg` format and presets are
-//! reused unchanged.
-
-mod config;
-mod image_buf;
-mod monitor;
-mod ops;
-mod pipeline;
+//! Thin CLI wrapper over the `ffcrt` library. Phase A (still images) is
+//! implemented end-to-end with no external binary. Video (Phase B) is not
+//! yet wired up.
 
 use anyhow::{bail, Result};
 use clap::Parser;
+use ffcrt::pipeline;
 use std::path::{Path, PathBuf};
 
 /// FFmpeg CRT transform — native Rust port (VileR 2021, ported 2026).

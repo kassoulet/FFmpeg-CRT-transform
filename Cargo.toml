@@ -1,12 +1,21 @@
 [package]
 name = "ffcrt"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "Native-Rust CRT/flat-panel monitor simulation (port of the FFmpeg-CRT-transform script)"
+description = "Native-Rust CRT / flat-panel monitor simulation — fast, configurable, no FFmpeg required"
+license = "MIT OR Apache-2.0"
+authors = ["VileR", "opencode contributors"]
+repository = "https://github.com/kassoulet/FFmpeg-CRT-transform"
+keywords = ["crt", "monitor", "simulation", "image-processing", "retro"]
+categories = ["multimedia::images", "graphics"]
 
 [[bin]]
 name = "ffcrt"
 path = "src/main.rs"
+
+[lib]
+name = "ffcrt"
+path = "src/lib.rs"
 
 [dependencies]
 image = "0.25"
@@ -16,3 +25,5 @@ rayon = "1"
 
 [profile.release]
 opt-level = 3
+lto = "fat"
+codegen-units = 1
