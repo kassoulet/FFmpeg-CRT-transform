@@ -1,0 +1,3 @@
+## 2025-05-15 - [Optimization Pattern: Edge Case Splitting in Horizontal Passes]
+**Learning:** For horizontal 1D convolution operations (like Gaussian blur), performance can be improved by splitting the horizontal pixel loop into three sections: left edge, middle (hot path), and right edge. The middle section can avoid branching and conditional logic (like clamping) because kernel samples are guaranteed to be in-bounds. This improves the compiler's ability to auto-vectorize and reduces branch misprediction overhead.
+**Action:** Apply this pattern to other horizontal image processing operations that use a sliding window/kernel when performance is critical.

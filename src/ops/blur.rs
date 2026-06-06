@@ -28,18 +28,58 @@ fn blur_h(img: &ImgF32, k: &[f32]) -> ImgF32 {
     let r = (k.len() / 2) as i64;
     let mut out = ImgF32::new(img.w, img.h);
     let row_stride = img.w * 4;
+    let w = img.w;
     out.data
         .par_chunks_exact_mut(row_stride)
         .enumerate()
         .for_each(|(y, row_out)| {
-            for x in 0..img.w {
+            let src_row = &img.data[y * row_stride..(y + 1) * row_stride];
+
+            let r_usize = r as usize;
+            let left_end = r_usize.min(w);
+            let right_start = (w.saturating_sub(r_usize)).max(left_end);
+
+            // 1. Left edge: needs clamping
+            for x in 0..left_end {
                 let mut acc = [0.0f32; 4];
-                for (j, &w) in k.iter().enumerate() {
-                    let sx = (x as i64 + j as i64 - r).clamp(0, img.w as i64 - 1) as usize;
-                    let p = img.get(sx, y);
-                    for c in 0..4 {
-                        acc[c] += p[c] * w;
-                    }
+                for (j, &kw) in k.iter().enumerate() {
+                    let sx = (x as i64 + j as i64 - r).clamp(0, w as i64 - 1) as usize;
+                    let si = sx * 4;
+                    acc[0] += src_row[si] * kw;
+                    acc[1] += src_row[si + 1] * kw;
+                    acc[2] += src_row[si + 2] * kw;
+                    acc[3] += src_row[si + 3] * kw;
+                }
+                let di = x * 4;
+                row_out[di..di + 4].copy_from_slice(&acc);
+            }
+
+            // 2. Middle: no clamping needed, sequential source access
+            for x in left_end..right_start {
+                let mut acc = [0.0f32; 4];
+                let start_idx = (x - r_usize) * 4;
+                let src_ptr = &src_row[start_idx..start_idx + k.len() * 4];
+                for (j, &kw) in k.iter().enumerate() {
+                    let si = j * 4;
+                    acc[0] += src_ptr[si] * kw;
+                    acc[1] += src_ptr[si + 1] * kw;
+                    acc[2] += src_ptr[si + 2] * kw;
+                    acc[3] += src_ptr[si + 3] * kw;
+                }
+                let di = x * 4;
+                row_out[di..di + 4].copy_from_slice(&acc);
+            }
+
+            // 3. Right edge: needs clamping
+            for x in right_start..w {
+                let mut acc = [0.0f32; 4];
+                for (j, &kw) in k.iter().enumerate() {
+                    let sx = (x as i64 + j as i64 - r).clamp(0, w as i64 - 1) as usize;
+                    let si = sx * 4;
+                    acc[0] += src_row[si] * kw;
+                    acc[1] += src_row[si + 1] * kw;
+                    acc[2] += src_row[si + 2] * kw;
+                    acc[3] += src_row[si + 3] * kw;
                 }
                 let di = x * 4;
                 row_out[di..di + 4].copy_from_slice(&acc);
