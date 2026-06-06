@@ -54,17 +54,17 @@ fn blur_v(img: &ImgF32, k: &[f32]) -> ImgF32 {
     out.data.par_chunks_exact_mut(row_stride)
         .enumerate()
         .for_each(|(y, row_out)| {
-            for x in 0..img.w {
-                let mut acc = [0.0f32; 4];
-                for (j, &w) in k.iter().enumerate() {
-                    let sy = (y as i64 + j as i64 - r).clamp(0, img.h as i64 - 1) as usize;
-                    let p = img.get(x, sy);
+            // Reorder loops: for each kernel tap, process the entire row horizontally.
+            // This ensures we read source pixels sequentially (sequential rows),
+            // improving cache locality significantly over per-pixel vertical strides.
+            for (j, &w) in k.iter().enumerate() {
+                let sy = (y as i64 + j as i64 - r).clamp(0, img.h as i64 - 1) as usize;
+                let src_row = &img.data[sy * row_stride..(sy + 1) * row_stride];
+                for (px_out, px_in) in row_out.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
                     for c in 0..4 {
-                        acc[c] += p[c] * w;
+                        px_out[c] += px_in[c] * w;
                     }
                 }
-                let di = x * 4;
-                row_out[di..di + 4].copy_from_slice(&acc);
             }
         });
     out
