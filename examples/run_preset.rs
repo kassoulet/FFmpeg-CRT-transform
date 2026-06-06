@@ -3,7 +3,6 @@
 /// Usage:  cargo run --example run_preset -- <preset.cfg> <input.png> [output.png]
 ///
 /// If output is omitted, writes to `out.png` in the current directory.
-
 use std::path::PathBuf;
 
 fn main() {
@@ -14,7 +13,10 @@ fn main() {
     }
     let config = PathBuf::from(&args[1]);
     let input = PathBuf::from(&args[2]);
-    let output = args.get(3).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("out.png"));
+    let output = args
+        .get(3)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("out.png"));
 
     ffcrt::run(&config, &input, &output, None).unwrap();
     eprintln!("Written to {}", output.display());

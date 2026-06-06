@@ -100,8 +100,8 @@ impl Curves {
             r: Spline::from_points(parse_points(r_spec)),
             g: Spline::from_points(parse_points(g_spec)),
             b: Spline::from_points(parse_points(b_spec)),
+        }
     }
-}
 
     pub fn apply(&self, img: &mut ImgF32) {
         img.data.par_chunks_exact_mut(4).for_each(|px| {

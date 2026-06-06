@@ -13,7 +13,8 @@ pub fn vignette(img: &mut ImgF32, power: f64) {
     let cy = img.h as f64 / 2.0;
     let rmax = (cx * cx + cy * cy).sqrt();
     let row_stride = img.w * 4;
-    img.data.par_chunks_exact_mut(row_stride)
+    img.data
+        .par_chunks_exact_mut(row_stride)
         .enumerate()
         .for_each(|(y, row)| {
             let dy = y as f64 + 0.5 - cy;
@@ -50,8 +51,12 @@ mod tests {
                 let a = copy.get(x, y);
                 let b = img.get(x, y);
                 for c in 0..4 {
-                    assert!((a[c] - b[c]).abs() < 1e-6,
-                        "pixel ({x},{y})[{c}] differs: {} vs {}", a[c], b[c]);
+                    assert!(
+                        (a[c] - b[c]).abs() < 1e-6,
+                        "pixel ({x},{y})[{c}] differs: {} vs {}",
+                        a[c],
+                        b[c]
+                    );
                 }
             }
         }

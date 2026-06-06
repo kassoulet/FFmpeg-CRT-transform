@@ -47,16 +47,28 @@ impl Filter {
         let t = t.abs();
         match self {
             Filter::Neighbor => {
-                if t < 0.5 { 1.0 } else { 0.0 }
+                if t < 0.5 {
+                    1.0
+                } else {
+                    0.0
+                }
             }
             Filter::FastBilinear | Filter::Bilinear => {
-                if t < 1.0 { 1.0 - t } else { 0.0 }
+                if t < 1.0 {
+                    1.0 - t
+                } else {
+                    0.0
+                }
             }
             Filter::Bicubic => cubic(t, -0.5),
             Filter::Lanczos => lanczos(t, 3.0),
             Filter::Gauss => {
                 // ffmpeg's gauss scaler is a gaussian; exp(-2 t^2) over support 2.
-                if t < 2.0 { (-2.0 * t * t).exp() } else { 0.0 }
+                if t < 2.0 {
+                    (-2.0 * t * t).exp()
+                } else {
+                    0.0
+                }
             }
         }
     }
@@ -120,7 +132,10 @@ fn build_contribs(src_size: usize, dst_size: usize, filter: Filter) -> Vec<Contr
             }
         }
         // Re-clamp the start so all indices are valid; we clamp per-sample below.
-        out.push(Contrib { start: start.min(src_size.saturating_sub(1)), weights });
+        out.push(Contrib {
+            start: start.min(src_size.saturating_sub(1)),
+            weights,
+        });
         // store the true left for indexing
         out.last_mut().unwrap().start = if left < 0 { 0 } else { left as usize };
     }
@@ -148,8 +163,7 @@ fn resample_axis(
             .enumerate()
             .for_each(|(y, row_out)| {
                 let src_row = &src[y * src_row_stride..(y + 1) * src_row_stride];
-                for x in 0..dst_w {
-                    let c = &contribs[x];
+                for (x, c) in contribs.iter().enumerate().take(dst_w) {
                     let mut acc = [0.0f32; 4];
                     for (i, &w) in c.weights.iter().enumerate() {
                         let sx = (c.start + i).min(src_w - 1);
@@ -173,7 +187,8 @@ fn resample_axis(
                 for (i, &w) in c.weights.iter().enumerate() {
                     let sy = (c.start + i).min(src_h - 1);
                     let src_row = &src[sy * src_row_stride..(sy + 1) * src_row_stride];
-                    for (px_out, px_in) in row_out.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
+                    for (px_out, px_in) in row_out.chunks_exact_mut(4).zip(src_row.chunks_exact(4))
+                    {
                         for c in 0..4 {
                             px_out[c] += px_in[c] * w;
                         }
@@ -198,7 +213,11 @@ pub fn resize(img: &ImgF32, new_w: usize, new_h: usize, filter: Filter) -> ImgF3
     // vertical pass on the width-resized buffer
     let vcontribs = build_contribs(img.h, new_h, filter);
     let out = resample_axis(&tmp, new_w, img.h, new_h, false, &vcontribs);
-    ImgF32 { w: new_w, h: new_h, data: out }
+    ImgF32 {
+        w: new_w,
+        h: new_h,
+        data: out,
+    }
 }
 
 #[cfg(test)]
@@ -257,7 +276,8 @@ pub fn nearest_scale(img: &ImgF32, fx: usize, fy: usize) -> ImgF32 {
     let nh = img.h * fy;
     let mut out = ImgF32::new(nw, nh);
     let row_stride = nw * 4;
-    out.data.par_chunks_exact_mut(row_stride)
+    out.data
+        .par_chunks_exact_mut(row_stride)
         .enumerate()
         .for_each(|(y, row)| {
             let sy = y / fy;

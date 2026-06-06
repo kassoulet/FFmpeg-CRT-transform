@@ -23,12 +23,20 @@ fn lighten(top: f32, bot: f32) -> f32 {
 #[inline]
 fn color_burn(a: f32, b: f32) -> f32 {
     // ffmpeg BURN(a,b): a==0 ? 0 : 1 - min(1,(1-b)/a)
-    if a <= 0.0 { 0.0 } else { 1.0 - (1.0 - b).min(a) / a.max(1e-6) }
+    if a <= 0.0 {
+        0.0
+    } else {
+        1.0 - (1.0 - b).min(a) / a.max(1e-6)
+    }
 }
 #[inline]
 fn color_dodge(a: f32, b: f32) -> f32 {
     // ffmpeg DODGE(a,b): a==1 ? 1 : min(1, b/(1-a))
-    if a >= 1.0 { 1.0 } else { (b / (1.0 - a)).min(1.0) }
+    if a >= 1.0 {
+        1.0
+    } else {
+        (b / (1.0 - a)).min(1.0)
+    }
 }
 #[inline]
 fn vividlight(top: f32, bot: f32) -> f32 {
@@ -65,7 +73,9 @@ impl Mode {
 /// (mimics `eof_action=repeat` / equal-size inputs in the script).
 pub fn blend(bottom: &mut ImgF32, top: &ImgF32, mode: Mode, opacity: f32) {
     let row_stride = bottom.w * 4;
-    bottom.data.par_chunks_exact_mut(row_stride)
+    bottom
+        .data
+        .par_chunks_exact_mut(row_stride)
         .enumerate()
         .for_each(|(y, row)| {
             let ty = y.min(top.h - 1);
@@ -86,7 +96,9 @@ pub fn blend(bottom: &mut ImgF32, top: &ImgF32, mode: Mode, opacity: f32) {
 /// `bottom` (B) = desaturated image, `top` (A) = scanline luminance.
 pub fn bloom_expr(bottom: &mut ImgF32, top: &ImgF32, power: f32) {
     let row_stride = bottom.w * 4;
-    bottom.data.par_chunks_exact_mut(row_stride)
+    bottom
+        .data
+        .par_chunks_exact_mut(row_stride)
         .enumerate()
         .for_each(|(y, row)| {
             let ty = y.min(top.h - 1);

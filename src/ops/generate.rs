@@ -18,10 +18,10 @@ pub fn round_corners(img: &mut ImgF32, radius: usize) {
     let r2 = r * r;
     // four corner centers (cx, cy) are the inner points of each rounded corner
     let corners = [
-        (r, r),                                  // top-left
-        (img.w as f64 - r, r),                   // top-right
-        (r, img.h as f64 - r),                   // bottom-left
-        (img.w as f64 - r, img.h as f64 - r),    // bottom-right
+        (r, r),                               // top-left
+        (img.w as f64 - r, r),                // top-right
+        (r, img.h as f64 - r),                // bottom-left
+        (img.w as f64 - r, img.h as f64 - r), // bottom-right
     ];
     for (ci, &(cx, cy)) in corners.iter().enumerate() {
         let (x0, x1, y0, y1) = match ci {
@@ -47,7 +47,9 @@ pub fn round_corners(img: &mut ImgF32, radius: usize) {
 pub fn scanline_column(period: usize, weight: f64) -> ImgF32 {
     let mut img = ImgF32::new(1, period.max(1));
     for y in 0..period {
-        let s = (y as f64 * std::f64::consts::PI / period as f64).sin().max(0.0);
+        let s = (y as f64 * std::f64::consts::PI / period as f64)
+            .sin()
+            .max(0.0);
         let lum = s.powf(1.0 / weight) as f32;
         img.set(0, y, [lum, lum, lum, 1.0]);
     }
@@ -57,6 +59,7 @@ pub fn scanline_column(period: usize, weight: f64) -> ImgF32 {
 /// Flat-panel pixel grid at native (SXINT x PY) resolution. Gap cells get
 /// `lum_gap`, pixel cells get `lum_px` (both 0..1). `gx`/`gy` are the cell
 /// pitch; `gap_x`/`gap_y` the gap width within each cell.
+#[allow(clippy::too_many_arguments)]
 pub fn pixel_grid(
     w: usize,
     h: usize,
@@ -71,13 +74,18 @@ pub fn pixel_grid(
     let gx = gx.max(1);
     let gy = gy.max(1);
     let row_stride = w * 4;
-    img.data.par_chunks_exact_mut(row_stride)
+    img.data
+        .par_chunks_exact_mut(row_stride)
         .enumerate()
         .for_each(|(y, row)| {
             let in_gap_y = gy >= gap_y && (y % gy) >= gx_sub(gy, gap_y);
             for x in 0..w {
                 let in_gap_x = gx >= gap_x && (x % gx) >= gx_sub(gx, gap_x);
-                let lum = if in_gap_x || in_gap_y { lum_gap } else { lum_px };
+                let lum = if in_gap_x || in_gap_y {
+                    lum_gap
+                } else {
+                    lum_px
+                };
                 let di = x * 4;
                 row[di..di + 4].copy_from_slice(&[lum, lum, lum, 1.0]);
             }

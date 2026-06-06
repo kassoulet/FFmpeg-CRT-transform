@@ -38,7 +38,7 @@ if [%1] neq [] if [%2] neq [] goto :ARGS_OK
 :: Find input dimensions and type (image/video) ::
 ::++++++++++++++++++++++++++++++++++++++++++++++::
 
-set IX= & SET IY= & SET FC= 
+set IX= & SET IY= & SET FC=
 for /f %%i IN ('ffprobe -hide_banner -loglevel quiet -select_streams v:0 -show_entries stream^=width^,height^,nb_frames %2 ^| find "="') do (
 	set x=%%i
 	if "!x:~0,6!"=="width=" SET IX=!x:~6!
@@ -120,7 +120,7 @@ if /i "%VIGNETTE_ON%"=="yes" (
 		[mkvig]setsar=sar=1/1, vignette=PI*%VIGNETTE_POWER%,format=gbrp16le[vig];^
 		[novig][vig]blend=all_mode='multiply':shortest=1,
 	) else (
-		SET VIGNETTE_STR=, vignette=PI*%VIGNETTE_POWER%, 
+		SET VIGNETTE_STR=, vignette=PI*%VIGNETTE_POWER%,
 	)
 ) else (
 	SET VIGNETTE_STR=,
@@ -168,7 +168,7 @@ if /i "%MONITOR_COLOR%"=="lcd-lite"   (set MONOCURVES=curves=r='0/.06 1/.64':g='
 if /i "%MONITOR_COLOR%"=="lcd-lwhite" (set MONOCURVES=curves=r='0/.09 1/.82':g='0/.18 1/.89':b='0/.29 1/.93', & set PXGRID_INVERT=1)
 if /i "%MONITOR_COLOR%"=="lcd-lblue"  (set MONOCURVES=curves=r='0/.00 1/.62':g='0/.22 1/.75':b='0/.73 1/.68', & set PXGRID_INVERT=1)
 
-:: allow lcd grain only for the appropriate monitor types 
+:: allow lcd grain only for the appropriate monitor types
 if /i "!MONITOR_COLOR:~0,3!"=="lcd" if %LCD_GRAIN% gtr 0 set TEXTURE_OVL=lcdgrain
 
 SET "MONO_STR1= " & SET "MONO_STR2= "
@@ -279,7 +279,7 @@ IF %OVL_ALPHA% gtr 0 goto :DO_MASK
 		lutrgb='r=gammaval(2.2):g=gammaval(2.2):b=gammaval(2.2)',^
 		scale=round(iw*%OVL_SCALE%):round(ih*%OVL_SCALE%):flags=lanczos+%SWSFLAGS%^" ^
 	TMPshadowmask1x.png
-	
+
 	set OVL_X= & SET OVL_Y= & for /f %%i IN ('ffprobe -hide_banner -loglevel quiet -show_entries stream^=width^,height TMPshadowmask1x.png ^| find "="') do (
 		set w=%%i
 		if "!w:~0,6!"=="width=" SET OVL_X=!w:~6!
@@ -287,7 +287,7 @@ IF %OVL_ALPHA% gtr 0 goto :DO_MASK
 	)
 	set /a "TILES_X=%PX%/%OVL_X%+1"
 	set /a "TILES_Y=%PY%/%OVL_Y%+1"
-	
+
 	ffmpeg -hide_banner -loglevel %LOGLVL% -stats -y -loop 1 -i TMPshadowmask1x.png -vf ^"^
 		tile=layout=%TILES_X%x%TILES_Y%,^
 		crop=%PX%:%PY%,^
@@ -364,7 +364,7 @@ ffmpeg -hide_banner -loglevel %LOGLVL% -stats -y -f lavfi ^
 	scale=%PX%:ih:flags=bicubic,^
 	lutrgb='r=gammaval(0.454545):g=gammaval(0.454545):b=gammaval(0.454545)',^
 	format=gbrp16le,format=rgb24^" ^
--frames:v 1 TMPgrid.png	
+-frames:v 1 TMPgrid.png
 
 if errorlevel 1 exit /b
 

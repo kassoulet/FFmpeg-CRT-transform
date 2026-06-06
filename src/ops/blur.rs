@@ -28,7 +28,8 @@ fn blur_h(img: &ImgF32, k: &[f32]) -> ImgF32 {
     let r = (k.len() / 2) as i64;
     let mut out = ImgF32::new(img.w, img.h);
     let row_stride = img.w * 4;
-    out.data.par_chunks_exact_mut(row_stride)
+    out.data
+        .par_chunks_exact_mut(row_stride)
         .enumerate()
         .for_each(|(y, row_out)| {
             for x in 0..img.w {
@@ -51,7 +52,8 @@ fn blur_v(img: &ImgF32, k: &[f32]) -> ImgF32 {
     let r = (k.len() / 2) as i64;
     let mut out = ImgF32::new(img.w, img.h);
     let row_stride = img.w * 4;
-    out.data.par_chunks_exact_mut(row_stride)
+    out.data
+        .par_chunks_exact_mut(row_stride)
         .enumerate()
         .for_each(|(y, row_out)| {
             // Reorder loops: for each kernel tap, process the entire row horizontally.

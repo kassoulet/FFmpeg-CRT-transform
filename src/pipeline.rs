@@ -82,7 +82,14 @@ pub fn run(
         cfg.f64_or("OVL_ALPHA", 0.0)
     };
 
-    let ctx = Ctx { cfg, d, mon, scanlines_on, ovl_alpha, dump };
+    let ctx = Ctx {
+        cfg,
+        d,
+        mon,
+        scanlines_on,
+        ovl_alpha,
+        dump,
+    };
 
     // INVERT_INPUT (negate). Temporal pre-process is video-only and skipped.
     if ctx.cfg.yes("INVERT_INPUT") {
@@ -146,14 +153,17 @@ fn build_bezel(ctx: &Ctx) -> ImgF32 {
 fn build_scanlines(ctx: &Ctx) -> ImgF32 {
     let weight = ctx.cfg.f64_or("SL_WEIGHT", 0.5).max(1e-3);
     // SCANLINE_PERIOD = PRESCALE_BY / SCAN_FACTOR (bc integer truncation).
-    let period = ((ctx.d.prescale as f64) / ctx.d.scan_factor.factor()).trunc().max(1.0) as usize;
+    let period = ((ctx.d.prescale as f64) / ctx.d.scan_factor.factor())
+        .trunc()
+        .max(1.0) as usize;
     let col = generate::scanline_column(period, weight);
     // Build PXxPY directly by repeating the period (avoids tiling round-off).
     let px = ctx.d.px as usize;
     let py = ctx.d.py as usize;
     let mut s = ImgF32::new(px, py);
     let row_stride = px * 4;
-    s.data.par_chunks_exact_mut(row_stride)
+    s.data
+        .par_chunks_exact_mut(row_stride)
         .enumerate()
         .for_each(|(y, row)| {
             let lum = col.get(0, y % period);
@@ -195,7 +205,9 @@ fn build_shadowmask(ctx: &Ctx) -> Result<ImgF32> {
     // tile to cover PXxPY
     let mut tiled = ImgF32::new(px, py);
     let row_stride = px * 4;
-    tiled.data.par_chunks_exact_mut(row_stride)
+    tiled
+        .data
+        .par_chunks_exact_mut(row_stride)
         .enumerate()
         .for_each(|(y, row)| {
             let sy = y % mh;
@@ -259,7 +271,11 @@ fn step01(ctx: &Ctx, img: &ImgF32, grid: Option<&ImgF32>) -> ImgF32 {
     cur = resample::nearest_scale(&cur, 1, prescale);
 
     if let Some(grid) = grid {
-        let mode = if ctx.mon.pxgrid_invert { Mode::Screen } else { Mode::Multiply };
+        let mode = if ctx.mon.pxgrid_invert {
+            Mode::Screen
+        } else {
+            Mode::Multiply
+        };
         blend::blend(&mut cur, grid, mode, 1.0);
     }
 
@@ -384,7 +400,8 @@ fn output(ctx: &Ctx, step03: ImgF32) -> Result<ImgF32> {
     let oy0 = (out.h.saturating_sub(cur.h)) / 2;
     let copy_h = cur.h.min(out.h);
     let copy_w = cur.w.min(out.w);
-    out.data.par_chunks_exact_mut(out.w * 4)
+    out.data
+        .par_chunks_exact_mut(out.w * 4)
         .skip(oy0)
         .take(copy_h)
         .enumerate()

@@ -8,6 +8,6 @@ pushd ..
 for %%b in (test-suite\??.*) do call ffcrt test-suite\%%~nbcfg.cfg %%b test-suite\%%~nb-out%%~xb
 popd
 
-echo TOTAL FOR ALL TESTS - 
+echo TOTAL FOR ALL TESTS -
 @echo Started:     %TESTRUNSTART%
 @echo Finished:    %time%

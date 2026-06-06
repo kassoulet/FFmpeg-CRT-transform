@@ -14,7 +14,7 @@ version.
 USAGE AND CONFIGURATION:
 
    Syntax: ffcrt <config_file> <input_file> [output_file]
-   
+
    * <input_file> must be a valid image or video.  Assumed to be 24-bit RGB (8
      bits/channel).
 

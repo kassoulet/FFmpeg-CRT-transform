@@ -49,7 +49,9 @@ mod tests {
 
     #[test]
     fn yes_false_by_default() {
-        let cfg = Config { raw: HashMap::new() };
+        let cfg = Config {
+            raw: HashMap::new(),
+        };
         assert!(!cfg.yes("ANYTHING"));
     }
 
@@ -157,15 +159,22 @@ impl Config {
 
     /// Case-insensitive yes/no flag.
     pub fn yes(&self, key: &str) -> bool {
-        matches!(self.opt(key).map(|s| s.to_ascii_lowercase()).as_deref(), Some("yes"))
+        matches!(
+            self.opt(key).map(|s| s.to_ascii_lowercase()).as_deref(),
+            Some("yes")
+        )
     }
 
     pub fn f64_or(&self, key: &str, default: f64) -> f64 {
-        self.opt(key).and_then(|s| s.parse().ok()).unwrap_or(default)
+        self.opt(key)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(default)
     }
 
     pub fn i64_or(&self, key: &str, default: i64) -> i64 {
-        self.opt(key).and_then(|s| s.parse().ok()).unwrap_or(default)
+        self.opt(key)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(default)
     }
 
     pub fn frac(&self, key: &str, default: Frac) -> Frac {
@@ -178,9 +187,15 @@ impl Config {
 
 pub fn parse_frac(s: &str) -> Result<Frac> {
     if let Some((n, d)) = s.split_once('/') {
-        Ok(Frac { num: n.trim().parse()?, den: d.trim().parse()? })
+        Ok(Frac {
+            num: n.trim().parse()?,
+            den: d.trim().parse()?,
+        })
     } else {
-        Ok(Frac { num: s.trim().parse()?, den: 1 })
+        Ok(Frac {
+            num: s.trim().parse()?,
+            den: 1,
+        })
     }
 }
 
@@ -253,7 +268,11 @@ impl Derived {
             v_px_blur / 100.0 * prescale as f64
         };
 
-        let scan_factor = match cfg.str_or("SCAN_FACTOR", "single").to_ascii_lowercase().as_str() {
+        let scan_factor = match cfg
+            .str_or("SCAN_FACTOR", "single")
+            .to_ascii_lowercase()
+            .as_str()
+        {
             "double" => ScanFactor::Double,
             "half" => ScanFactor::Half,
             _ => ScanFactor::Single,
@@ -264,7 +283,11 @@ impl Derived {
         // FLAT_PANEL forces CRT curvature off (and, in callers, scanlines +
         // overlay). The bezel-curvature max is computed *after* that override,
         // matching the order in ffcrt.sh.
-        let crt_curvature = if flat_panel { 0.0 } else { cfg.f64_or("CRT_CURVATURE", 0.0) };
+        let crt_curvature = if flat_panel {
+            0.0
+        } else {
+            cfg.f64_or("CRT_CURVATURE", 0.0)
+        };
         let mut bezel_curvature = cfg.f64_or("BEZEL_CURVATURE", 0.0);
         if bezel_curvature < crt_curvature {
             bezel_curvature = crt_curvature;

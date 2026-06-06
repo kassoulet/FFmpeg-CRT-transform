@@ -35,7 +35,11 @@ fn cli_accepts_png_input() {
         .arg(&tmp)
         .output()
         .unwrap();
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(tmp.exists(), "output file was not created");
 
     let meta = std::fs::metadata(&tmp).unwrap();

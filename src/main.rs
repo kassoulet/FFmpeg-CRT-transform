@@ -50,7 +50,12 @@ fn main() -> Result<()> {
         None => derive_output(&cli.config_file, &cli.input_file)?,
     };
 
-    eprintln!("ffcrt: {} + {} -> {}", cli.input_file.display(), cli.config_file.display(), output.display());
+    eprintln!(
+        "ffcrt: {} + {} -> {}",
+        cli.input_file.display(),
+        cli.config_file.display(),
+        output.display()
+    );
     pipeline::run(&cli.config_file, &cli.input_file, &output, cli.dump_stages)?;
     eprintln!("Done: {}", output.display());
     Ok(())

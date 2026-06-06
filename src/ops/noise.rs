@@ -31,7 +31,8 @@ pub fn gray_noise(w: usize, h: usize, seed: u64, strength: f64) -> ImgF32 {
     let amp = (strength / 255.0) as f32;
     let mut img = ImgF32::new(w, h);
     let row_stride = w * 4;
-    img.data.par_chunks_exact_mut(row_stride)
+    img.data
+        .par_chunks_exact_mut(row_stride)
         .enumerate()
         .for_each(|(y, row)| {
             for x in 0..w {

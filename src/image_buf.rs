@@ -19,7 +19,11 @@ pub struct ImgF32 {
 
 impl ImgF32 {
     pub fn new(w: usize, h: usize) -> Self {
-        ImgF32 { w, h, data: vec![0.0; w * h * 4] }
+        ImgF32 {
+            w,
+            h,
+            data: vec![0.0; w * h * 4],
+        }
     }
 
     /// Solid fill (alpha included).
@@ -39,7 +43,12 @@ impl ImgF32 {
     #[inline]
     pub fn get(&self, x: usize, y: usize) -> [f32; 4] {
         let i = self.idx(x, y);
-        [self.data[i], self.data[i + 1], self.data[i + 2], self.data[i + 3]]
+        [
+            self.data[i],
+            self.data[i + 1],
+            self.data[i + 2],
+            self.data[i + 3],
+        ]
     }
 
     #[inline]
@@ -61,11 +70,15 @@ impl ImgF32 {
     /// Load an image file as RGBA f32 (0..1). 8- and 16-bit sources are both
     /// normalized; alpha defaults to opaque when the source has none.
     pub fn load(path: &Path) -> Result<Self> {
-        let dyn_img = image::open(path)
-            .with_context(|| format!("Couldn't read image {}", path.display()))?;
+        let dyn_img =
+            image::open(path).with_context(|| format!("Couldn't read image {}", path.display()))?;
         let rgba = dyn_img.to_rgba32f(); // image crate already linearizes nothing; raw 0..1
         let (w, h) = (rgba.width() as usize, rgba.height() as usize);
-        Ok(ImgF32 { w, h, data: rgba.into_raw() })
+        Ok(ImgF32 {
+            w,
+            h,
+            data: rgba.into_raw(),
+        })
     }
 
     /// Quantize and write. `bpc` is 8 or 16; alpha is dropped (RGB output).
@@ -79,9 +92,13 @@ impl ImgF32 {
                     }
                 }
                 let img = image::ImageBuffer::<image::Rgb<u16>, _>::from_raw(
-                    self.w as u32, self.h as u32, buf,
-                ).context("rgb48 buffer size mismatch")?;
-                img.save(path).with_context(|| format!("write {}", path.display()))?;
+                    self.w as u32,
+                    self.h as u32,
+                    buf,
+                )
+                .context("rgb48 buffer size mismatch")?;
+                img.save(path)
+                    .with_context(|| format!("write {}", path.display()))?;
             }
             _ => {
                 let mut buf: Vec<u8> = Vec::with_capacity(self.w * self.h * 3);
@@ -91,9 +108,13 @@ impl ImgF32 {
                     }
                 }
                 let img = image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(
-                    self.w as u32, self.h as u32, buf,
-                ).context("rgb24 buffer size mismatch")?;
-                img.save(path).with_context(|| format!("write {}", path.display()))?;
+                    self.w as u32,
+                    self.h as u32,
+                    buf,
+                )
+                .context("rgb24 buffer size mismatch")?;
+                img.save(path)
+                    .with_context(|| format!("write {}", path.display()))?;
             }
         }
         Ok(())

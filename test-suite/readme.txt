@@ -5,7 +5,7 @@ settings.  The idea is:
 - To let you test any changes you make to the FFcrt script, by getting
   "before" and "after" result sets which you can compare to check for
   regressions
-  
+
 - More generally, to give some examples of the kind of input that FFcrt is
   designed to work with, along with some nice sample settings
 

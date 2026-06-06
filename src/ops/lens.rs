@@ -46,7 +46,8 @@ pub fn lenscorrection(img: &ImgF32, k1: f64, k2: f64) -> ImgF32 {
     let half_diag = (cx * cx + cy * cy).sqrt();
     let mut out = ImgF32::new(img.w, img.h);
     let row_stride = img.w * 4;
-    out.data.par_chunks_exact_mut(row_stride)
+    out.data
+        .par_chunks_exact_mut(row_stride)
         .enumerate()
         .for_each(|(y, row_out)| {
             let dy = y as f64 + 0.5 - cy;
@@ -84,8 +85,12 @@ mod tests {
                 let a = img.get(x, y);
                 let b = out.get(x, y);
                 for c in 0..4 {
-                    assert!((a[c] - b[c]).abs() < 1e-6,
-                        "pixel ({x},{y})[{c}] differs: {} vs {}", a[c], b[c]);
+                    assert!(
+                        (a[c] - b[c]).abs() < 1e-6,
+                        "pixel ({x},{y})[{c}] differs: {} vs {}",
+                        a[c],
+                        b[c]
+                    );
                 }
             }
         }
