@@ -135,52 +135,49 @@ fn resample_axis(
     horizontal: bool,
     contribs: &[Contrib],
 ) -> Vec<f32> {
-    let (dst_h, out_w, out_h) = if horizontal {
-        (src_h, dst_w, src_h)
+    let (out_w, out_h) = if horizontal {
+        (dst_w, src_h)
     } else {
-        (dst_w, src_w, dst_w)
+        (src_w, dst_w)
     };
     let mut out = vec![0.0f32; out_w * out_h * 4];
     if horizontal {
-        let row_stride = dst_w * 4;
-        out.par_chunks_exact_mut(row_stride)
+        let src_row_stride = src_w * 4;
+        let dst_row_stride = dst_w * 4;
+        out.par_chunks_exact_mut(dst_row_stride)
             .enumerate()
             .for_each(|(y, row_out)| {
+                let src_row = &src[y * src_row_stride..(y + 1) * src_row_stride];
                 for x in 0..dst_w {
                     let c = &contribs[x];
                     let mut acc = [0.0f32; 4];
                     for (i, &w) in c.weights.iter().enumerate() {
                         let sx = (c.start + i).min(src_w - 1);
-                        let si = (y * src_w + sx) * 4;
-                        acc[0] += src[si] * w;
-                        acc[1] += src[si + 1] * w;
-                        acc[2] += src[si + 2] * w;
-                        acc[3] += src[si + 3] * w;
+                        let si = sx * 4;
+                        for c in 0..4 {
+                            acc[c] += src_row[si + c] * w;
+                        }
                     }
                     let di = x * 4;
                     row_out[di..di + 4].copy_from_slice(&acc);
                 }
             });
     } else {
-        let _new_h = dst_w;
-        let _dst_h = dst_h;
-        let row_stride = src_w * 4;
-        out.par_chunks_exact_mut(row_stride)
+        let src_row_stride = src_w * 4;
+        let dst_row_stride = out_w * 4;
+        out.par_chunks_exact_mut(dst_row_stride)
             .enumerate()
             .for_each(|(y, row_out)| {
                 let c = &contribs[y];
-                for x in 0..src_w {
-                    let mut acc = [0.0f32; 4];
-                    for (i, &w) in c.weights.iter().enumerate() {
-                        let sy = (c.start + i).min(src_h - 1);
-                        let si = (sy * src_w + x) * 4;
-                        acc[0] += src[si] * w;
-                        acc[1] += src[si + 1] * w;
-                        acc[2] += src[si + 2] * w;
-                        acc[3] += src[si + 3] * w;
+                // Reorder loops: for each kernel tap, process the entire row horizontally.
+                for (i, &w) in c.weights.iter().enumerate() {
+                    let sy = (c.start + i).min(src_h - 1);
+                    let src_row = &src[sy * src_row_stride..(sy + 1) * src_row_stride];
+                    for (px_out, px_in) in row_out.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
+                        for c in 0..4 {
+                            px_out[c] += px_in[c] * w;
+                        }
                     }
-                    let di = x * 4;
-                    row_out[di..di + 4].copy_from_slice(&acc);
                 }
             });
     }
