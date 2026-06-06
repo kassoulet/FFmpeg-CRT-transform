@@ -99,3 +99,60 @@ impl ImgF32 {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_creates_correct_size() {
+        let img = ImgF32::new(10, 20);
+        assert_eq!(img.w, 10);
+        assert_eq!(img.h, 20);
+        assert_eq!(img.data.len(), 10 * 20 * 4);
+        // all zero
+        assert!(img.data.iter().all(|&v| v == 0.0));
+    }
+
+    #[test]
+    fn filled_sets_all_pixels() {
+        let img = ImgF32::filled(3, 4, [0.2, 0.4, 0.6, 1.0]);
+        for y in 0..4 {
+            for x in 0..3 {
+                assert_eq!(img.get(x, y), [0.2, 0.4, 0.6, 1.0]);
+            }
+        }
+    }
+
+    #[test]
+    fn get_set_roundtrip() {
+        let mut img = ImgF32::new(5, 5);
+        img.set(2, 3, [0.1, 0.2, 0.3, 0.5]);
+        let p = img.get(2, 3);
+        assert_eq!(p[0], 0.1);
+        assert_eq!(p[1], 0.2);
+        assert_eq!(p[2], 0.3);
+        assert_eq!(p[3], 0.5);
+    }
+
+    #[test]
+    fn map_rgb_applies_to_rgb_only() {
+        let mut img = ImgF32::new(1, 1);
+        img.set(0, 0, [0.5, 0.5, 0.5, 0.25]);
+        img.map_rgb(|x| x * 2.0);
+        let p = img.get(0, 0);
+        assert_eq!(p[0], 1.0);
+        assert_eq!(p[1], 1.0);
+        assert_eq!(p[2], 1.0);
+        assert_eq!(p[3], 0.25); // alpha unchanged
+    }
+
+    #[test]
+    fn clone_is_independent() {
+        let mut img = ImgF32::new(2, 2);
+        img.set(0, 0, [0.5, 0.5, 0.5, 1.0]);
+        let copy = img.clone();
+        img.set(0, 0, [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(copy.get(0, 0)[0], 0.5);
+    }
+}

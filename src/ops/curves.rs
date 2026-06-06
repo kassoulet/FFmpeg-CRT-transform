@@ -100,8 +100,8 @@ impl Curves {
             r: Spline::from_points(parse_points(r_spec)),
             g: Spline::from_points(parse_points(g_spec)),
             b: Spline::from_points(parse_points(b_spec)),
-        }
     }
+}
 
     pub fn apply(&self, img: &mut ImgF32) {
         img.data.par_chunks_exact_mut(4).for_each(|px| {
@@ -109,5 +109,49 @@ impl Curves {
             px[1] = self.g.eval(px[1] as f64) as f32;
             px[2] = self.b.eval(px[2] as f64) as f32;
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identity_spline() {
+        let spline = Spline::from_points(vec![(0.0, 0.0), (1.0, 1.0)]);
+        assert!((spline.eval(0.0) - 0.0).abs() < 1e-6);
+        assert!((spline.eval(1.0) - 1.0).abs() < 1e-6);
+        assert!((spline.eval(0.5) - 0.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn spline_clamps_outside_range() {
+        let spline = Spline::from_points(vec![(0.2, 0.3), (0.8, 0.7)]);
+        assert!((spline.eval(0.0) - 0.3).abs() < 1e-6);
+        assert!((spline.eval(1.0) - 0.7).abs() < 1e-6);
+    }
+
+    #[test]
+    fn curves_apply_changes_image() {
+        let curves = Curves::new("0/0 1/1", "0/0 1/1", "0/0 0.5/1");
+        let mut img = ImgF32::new(1, 1);
+        img.set(0, 0, [0.5, 0.5, 0.5, 1.0]);
+        curves.apply(&mut img);
+        let p = img.get(0, 0);
+        assert!((p[2] - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn empty_spline_returns_input() {
+        let spline = Spline::from_points(vec![]);
+        assert!((spline.eval(0.5) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_points_handles_whitespace() {
+        let pts = parse_points("0/0 0.5/0.25 1/1");
+        assert_eq!(pts.len(), 3);
+        assert!((pts[1].0 - 0.5).abs() < 1e-6);
+        assert!((pts[1].1 - 0.25).abs() < 1e-6);
     }
 }

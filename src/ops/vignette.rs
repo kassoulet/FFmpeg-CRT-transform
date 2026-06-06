@@ -30,3 +30,44 @@ pub fn vignette(img: &mut ImgF32, power: f64) {
             }
         });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn power_zero_nop() {
+        let mut img = ImgF32::new(8, 8);
+        for y in 0..8 {
+            for x in 0..8 {
+                img.set(x, y, [0.5, 0.5, 0.5, 1.0]);
+            }
+        }
+        let copy = img.clone();
+        vignette(&mut img, 0.0);
+        for y in 0..8 {
+            for x in 0..8 {
+                let a = copy.get(x, y);
+                let b = img.get(x, y);
+                for c in 0..4 {
+                    assert!((a[c] - b[c]).abs() < 1e-6,
+                        "pixel ({x},{y})[{c}] differs: {} vs {}", a[c], b[c]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn corners_darker_than_center() {
+        let mut img = ImgF32::new(16, 16);
+        for y in 0..16 {
+            for x in 0..16 {
+                img.set(x, y, [1.0, 1.0, 1.0, 1.0]);
+            }
+        }
+        vignette(&mut img, 0.3);
+        let center = img.get(7, 7)[0];
+        let corner = img.get(0, 0)[0];
+        assert!(center > corner, "center={center} <= corner={corner}");
+    }
+}

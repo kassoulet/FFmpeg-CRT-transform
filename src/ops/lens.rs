@@ -64,3 +64,43 @@ pub fn lenscorrection(img: &ImgF32, k1: f64, k2: f64) -> ImgF32 {
         });
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn k_zero_returns_clone() {
+        let mut img = ImgF32::new(16, 16);
+        for y in 0..16 {
+            for x in 0..16 {
+                let v = (x + y) as f32 / 30.0;
+                img.set(x, y, [v, v, v, 1.0]);
+            }
+        }
+        let out = lenscorrection(&img, 0.0, 0.0);
+        for y in 0..16 {
+            for x in 0..16 {
+                let a = img.get(x, y);
+                let b = out.get(x, y);
+                for c in 0..4 {
+                    assert!((a[c] - b[c]).abs() < 1e-6,
+                        "pixel ({x},{y})[{c}] differs: {} vs {}", a[c], b[c]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn white_center_stays_white() {
+        let mut img = ImgF32::new(8, 8);
+        for y in 0..8 {
+            for x in 0..8 {
+                img.set(x, y, [1.0, 1.0, 1.0, 1.0]);
+            }
+        }
+        let out = lenscorrection(&img, -0.2, 0.0);
+        let c = out.get(3, 3); // near center
+        assert!(c[0] > 0.99, "center red = {}", c[0]);
+    }
+}

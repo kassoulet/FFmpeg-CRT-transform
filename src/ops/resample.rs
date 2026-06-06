@@ -9,7 +9,7 @@
 use crate::image_buf::ImgF32;
 use rayon::prelude::*;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Filter {
     Neighbor,
     FastBilinear,
@@ -199,6 +199,52 @@ pub fn resize(img: &ImgF32, new_w: usize, new_h: usize, filter: Filter) -> ImgF3
     let vcontribs = build_contribs(img.h, new_h, filter);
     let out = resample_axis(&tmp, new_w, img.h, new_h, false, &vcontribs);
     ImgF32 { w: new_w, h: new_h, data: out }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resize_same_size_returns_clone() {
+        let img = ImgF32::new(5, 5);
+        let r = resize(&img, 5, 5, Filter::Bilinear);
+        assert_eq!(r.data, img.data);
+    }
+
+    #[test]
+    fn nearest_scale_identity() {
+        let img = ImgF32::new(3, 3);
+        let r = nearest_scale(&img, 1, 1);
+        assert_eq!(r.data, img.data);
+    }
+
+    #[test]
+    fn nearest_scale_doubles_pixels() {
+        let mut img = ImgF32::new(2, 2);
+        img.set(0, 0, [0.1, 0.2, 0.3, 1.0]);
+        img.set(1, 0, [0.4, 0.5, 0.6, 1.0]);
+        img.set(0, 1, [0.7, 0.8, 0.9, 1.0]);
+        img.set(1, 1, [1.0, 1.0, 1.0, 1.0]);
+        let r = nearest_scale(&img, 2, 2);
+        assert_eq!(r.w, 4);
+        assert_eq!(r.h, 4);
+        assert_eq!(r.get(0, 0), img.get(0, 0));
+        assert_eq!(r.get(1, 0), img.get(0, 0));
+        assert_eq!(r.get(3, 3), img.get(1, 1));
+    }
+
+    #[test]
+    fn filter_parse_all_variants() {
+        assert_eq!(Filter::parse("neighbor"), Filter::Neighbor);
+        assert_eq!(Filter::parse("fast_bilinear"), Filter::FastBilinear);
+        assert_eq!(Filter::parse("bilinear"), Filter::Bilinear);
+        assert_eq!(Filter::parse("lanczos"), Filter::Lanczos);
+        assert_eq!(Filter::parse("gauss"), Filter::Gauss);
+        assert_eq!(Filter::parse("Neighbor"), Filter::Neighbor);
+        assert_eq!(Filter::parse("bicubic"), Filter::Bicubic);
+        assert_eq!(Filter::parse("unknown"), Filter::Bicubic);
+    }
 }
 
 /// Integer nearest-neighbor upscale by independent x/y factors (the `neighbor`

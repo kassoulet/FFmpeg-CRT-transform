@@ -61,3 +61,57 @@ pub fn crop(img: &ImgF32, r: &Rect) -> ImgF32 {
         });
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detect_all_white_full_rect() {
+        let mut img = ImgF32::new(8, 6);
+        for y in 0..6 { for x in 0..8 { img.set(x, y, [1.0, 1.0, 1.0, 1.0]); } }
+        let r = detect(&img, 0.1);
+        assert_eq!(r.x, 0);
+        assert_eq!(r.y, 0);
+        assert_eq!(r.w, 8);
+        assert_eq!(r.h, 6);
+    }
+
+    #[test]
+    fn detect_all_black_returns_full() {
+        let mut img = ImgF32::new(8, 6);
+        for y in 0..6 { for x in 0..8 { img.set(x, y, [0.0, 0.0, 0.0, 1.0]); } }
+        let r = detect(&img, 0.1);
+        assert_eq!(r.x, 0);
+        assert_eq!(r.y, 0);
+        assert_eq!(r.w, 8);
+        assert_eq!(r.h, 6);
+    }
+
+    #[test]
+    fn detect_single_white_pixel() {
+        let mut img = ImgF32::new(10, 10);
+        for y in 0..10 { for x in 0..10 { img.set(x, y, [0.0, 0.0, 0.0, 1.0]); } }
+        img.set(5, 3, [1.0, 1.0, 1.0, 1.0]);
+        let r = detect(&img, 0.5);
+        // White pixel at (5,3) → rect from (5,3) to (5,3), rounded to even
+        assert!(r.x <= 5);
+        assert!(r.y <= 3);
+        assert!(r.x + r.w > 5);
+        assert!(r.y + r.h > 3);
+        assert_eq!(r.w % 2, 0);
+        assert_eq!(r.h % 2, 0);
+    }
+
+    #[test]
+    fn crop_sub_region() {
+        let mut img = ImgF32::new(8, 8);
+        for y in 0..8 { for x in 0..8 { img.set(x, y, [1.0, 1.0, 1.0, 1.0]); } }
+        for y in 2..6 { for x in 2..6 { img.set(x, y, [0.5, 0.5, 0.5, 1.0]); } }
+        let r = Rect { x: 2, y: 2, w: 4, h: 4 };
+        let cropped = crop(&img, &r);
+        assert_eq!(cropped.w, 4);
+        assert_eq!(cropped.h, 4);
+        assert_eq!(cropped.get(0, 0)[0], 0.5);
+    }
+}

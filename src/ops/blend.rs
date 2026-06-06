@@ -106,3 +106,82 @@ pub fn bloom_expr(bottom: &mut ImgF32, top: &ImgF32, power: f32) {
             }
         });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn constant(w: usize, h: usize, val: f32) -> ImgF32 {
+        let mut img = ImgF32::new(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                img.set(x, y, [val, val, val, 1.0]);
+            }
+        }
+        img
+    }
+
+    #[test]
+    fn multiply_zero() {
+        let mut bot = constant(1, 1, 0.3);
+        let top = constant(1, 1, 0.0);
+        blend(&mut bot, &top, Mode::Multiply, 1.0);
+        assert_eq!(bot.get(0, 0)[0], 0.0);
+    }
+
+    #[test]
+    fn multiply_one() {
+        let mut bot = constant(1, 1, 0.3);
+        let top = constant(1, 1, 1.0);
+        blend(&mut bot, &top, Mode::Multiply, 1.0);
+        assert_eq!(bot.get(0, 0)[0], 0.3);
+    }
+
+    #[test]
+    fn multiply_half() {
+        let mut bot = constant(1, 1, 0.5);
+        let top = constant(1, 1, 0.5);
+        blend(&mut bot, &top, Mode::Multiply, 1.0);
+        assert_eq!(bot.get(0, 0)[0], 0.25);
+    }
+
+    #[test]
+    fn screen_zero() {
+        let mut bot = constant(1, 1, 0.3);
+        let top = constant(1, 1, 0.0);
+        blend(&mut bot, &top, Mode::Screen, 1.0);
+        assert_eq!(bot.get(0, 0)[0], 0.3);
+    }
+
+    #[test]
+    fn screen_one() {
+        let mut bot = constant(1, 1, 0.3);
+        let top = constant(1, 1, 1.0);
+        blend(&mut bot, &top, Mode::Screen, 1.0);
+        assert_eq!(bot.get(0, 0)[0], 1.0);
+    }
+
+    #[test]
+    fn opacity_zero_no_change() {
+        let mut bot = constant(1, 1, 0.3);
+        let top = constant(1, 1, 1.0);
+        blend(&mut bot, &top, Mode::Multiply, 0.0);
+        assert_eq!(bot.get(0, 0)[0], 0.3);
+    }
+
+    #[test]
+    fn bloom_low_leaf_unchanged() {
+        let mut bot = constant(1, 1, 0.3);
+        let top = constant(1, 1, 0.4);
+        bloom_expr(&mut bot, &top, 1.0);
+        assert_eq!(bot.get(0, 0)[0], 0.3);
+    }
+
+    #[test]
+    fn bloom_high_brightens() {
+        let mut bot = constant(1, 1, 0.3);
+        let top = constant(1, 1, 1.0);
+        bloom_expr(&mut bot, &top, 1.0);
+        assert!((bot.get(0, 0)[0] - 1.0).abs() < 1e-6);
+    }
+}

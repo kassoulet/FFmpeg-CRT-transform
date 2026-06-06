@@ -11,6 +11,101 @@ use anyhow::{anyhow, bail, Result};
 use std::collections::HashMap;
 use std::path::Path;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_frac_simple() {
+        let f = parse_frac("2/3").unwrap();
+        assert_eq!(f.num, 2);
+        assert_eq!(f.den, 3);
+    }
+
+    #[test]
+    fn parse_frac_whole() {
+        let f = parse_frac("5").unwrap();
+        assert_eq!(f.num, 5);
+        assert_eq!(f.den, 1);
+    }
+
+    #[test]
+    fn parse_frac_invalid() {
+        assert!(parse_frac("abc").is_err());
+        assert!(parse_frac("").is_err());
+    }
+
+    #[test]
+    fn load_skips_comments_and_blanks() {
+        let text = "KEY_A 1\n; comment\n\nKEY_B yes\n";
+        let path = std::env::temp_dir().join("test_config.cfg");
+        std::fs::write(&path, text).unwrap();
+        let cfg = Config::load(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(cfg.str_or("KEY_A", ""), "1");
+        assert_eq!(cfg.str_or("KEY_B", ""), "yes");
+        assert_eq!(cfg.str_or("NONEXIST", "default"), "default");
+    }
+
+    #[test]
+    fn yes_false_by_default() {
+        let cfg = Config { raw: HashMap::new() };
+        assert!(!cfg.yes("ANYTHING"));
+    }
+
+    #[test]
+    fn yes_true_for_yes() {
+        let mut raw = HashMap::new();
+        raw.insert("FLAG".into(), "yes".into());
+        let cfg = Config { raw };
+        assert!(cfg.yes("FLAG"));
+        assert!(!cfg.yes("OTHER"));
+    }
+
+    #[test]
+    fn i64_or_present_and_default() {
+        let mut raw = HashMap::new();
+        raw.insert("VAL".into(), "42".into());
+        let cfg = Config { raw };
+        assert_eq!(cfg.i64_or("VAL", 0), 42);
+        assert_eq!(cfg.i64_or("MISSING", 99), 99);
+    }
+
+    #[test]
+    fn f64_or_present() {
+        let mut raw = HashMap::new();
+        raw.insert("PI".into(), "3.14".into());
+        let cfg = Config { raw };
+        assert!((cfg.f64_or("PI", 0.0) - 3.14).abs() < 1e-9);
+    }
+
+    #[test]
+    fn scan_factor_values() {
+        assert_eq!(ScanFactor::Single.factor(), 1.0);
+        assert_eq!(ScanFactor::Double.factor(), 2.0);
+        assert_eq!(ScanFactor::Half.factor(), 0.5);
+        assert_eq!(ScanFactor::Single.count(480), 480);
+        assert_eq!(ScanFactor::Double.count(480), 960);
+        assert_eq!(ScanFactor::Half.count(481), 240);
+    }
+
+    #[test]
+    fn derived_compute_simple() {
+        // Simulate a minimal config
+        let mut raw = HashMap::new();
+        raw.insert("PRESCALE_BY".into(), "2".into());
+        raw.insert("PX_ASPECT".into(), "1/1".into());
+        raw.insert("OY".into(), "1080".into());
+        let cfg = Config { raw };
+        let d = Derived::compute(&cfg, 320, 200).unwrap();
+        assert_eq!(d.prescale, 2);
+        assert_eq!(d.sxint, 640);
+        assert_eq!(d.px, 640);
+        assert_eq!(d.py, 400);
+        assert_eq!(d.oy, 1080);
+    }
+}
+
 pub struct Config {
     raw: HashMap<String, String>,
 }

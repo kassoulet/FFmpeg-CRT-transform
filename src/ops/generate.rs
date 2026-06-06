@@ -119,3 +119,83 @@ pub fn brighten(img: &mut ImgF32, mult: f64) {
 pub fn negate(img: &mut ImgF32) {
     img.map_rgb(|v| 1.0 - v);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_corners_zero_radius_is_nop() {
+        let mut img = ImgF32::filled(10, 10, [1.0, 1.0, 1.0, 1.0]);
+        round_corners(&mut img, 0);
+        for y in 0..10 {
+            for x in 0..10 {
+                assert_eq!(img.get(x, y)[0], 1.0);
+            }
+        }
+    }
+
+    #[test]
+    fn round_corners_cuts_corners() {
+        let mut img = ImgF32::filled(6, 6, [1.0, 1.0, 1.0, 1.0]);
+        round_corners(&mut img, 2);
+        // corner pixel should be black (outside radius)
+        assert_eq!(img.get(0, 0)[0], 0.0);
+        // center pixel stays white
+        assert_eq!(img.get(2, 2)[0], 1.0);
+    }
+
+    #[test]
+    fn scanline_column_range() {
+        let col = scanline_column(4, 1.0);
+        assert_eq!(col.w, 1);
+        assert_eq!(col.h, 4);
+        // at y=0, sin(0) = 0
+        assert_eq!(col.get(0, 0)[0], 0.0);
+        // at mid-point, sin(pi/2) = 1
+        assert_eq!(col.get(0, 2)[0], 1.0);
+    }
+
+    #[test]
+    fn pixel_grid_dimensions() {
+        let grid = pixel_grid(20, 10, 4, 4, 1, 1, 0.0, 1.0);
+        assert_eq!(grid.w, 20);
+        assert_eq!(grid.h, 10);
+    }
+
+    #[test]
+    fn grayscale_rec601() {
+        let mut img = ImgF32::new(1, 1);
+        img.set(0, 0, [1.0, 0.0, 0.0, 1.0]);
+        to_gray(&mut img);
+        let v = img.get(0, 0)[0];
+        assert!((v - 0.299).abs() < 1e-6);
+    }
+
+    #[test]
+    fn blackpoint_zero_is_nop() {
+        let mut img = ImgF32::new(1, 1);
+        img.set(0, 0, [0.5, 0.5, 0.5, 1.0]);
+        blackpoint(&mut img, 0.0);
+        assert_eq!(img.get(0, 0)[0], 0.5);
+    }
+
+    #[test]
+    fn brighten_mult_one_is_nop() {
+        let mut img = ImgF32::new(1, 1);
+        img.set(0, 0, [0.5, 0.5, 0.5, 1.0]);
+        brighten(&mut img, 1.0);
+        assert_eq!(img.get(0, 0)[0], 0.5);
+    }
+
+    #[test]
+    fn negate_inverts() {
+        let mut img = ImgF32::new(1, 1);
+        img.set(0, 0, [0.3, 0.6, 0.9, 1.0]);
+        negate(&mut img);
+        let p = img.get(0, 0);
+        assert!((p[0] - 0.7).abs() < 1e-6);
+        assert!((p[1] - 0.4).abs() < 1e-6);
+        assert!((p[2] - 0.1).abs() < 1e-6);
+    }
+}

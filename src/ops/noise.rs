@@ -43,3 +43,45 @@ pub fn gray_noise(w: usize, h: usize, seed: u64, strength: f64) -> ImgF32 {
         });
     img
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gray_noise_correct_dimensions() {
+        let img = gray_noise(16, 9, 5150, 32.0);
+        assert_eq!(img.w, 16);
+        assert_eq!(img.h, 9);
+        assert_eq!(img.data.len(), 16 * 9 * 4);
+    }
+
+    #[test]
+    fn gray_noise_values_in_range() {
+        let img = gray_noise(32, 32, 5150, 64.0);
+        for y in 0..32 {
+            for x in 0..32 {
+                let p = img.get(x, y);
+                assert!(p[0] >= 0.0 && p[0] <= 1.0, "pixel ({x},{y}) = {}", p[0]);
+                assert_eq!(p[3], 1.0);
+            }
+        }
+    }
+
+    #[test]
+    fn gray_noise_deterministic() {
+        let a = gray_noise(8, 8, 5150, 32.0);
+        let b = gray_noise(8, 8, 5150, 32.0);
+        assert_eq!(a.data, b.data);
+    }
+
+    #[test]
+    fn zero_strength_gray_field() {
+        let img = gray_noise(4, 4, 5150, 0.0);
+        for y in 0..4 {
+            for x in 0..4 {
+                assert_eq!(img.get(x, y)[0], 0.5);
+            }
+        }
+    }
+}
