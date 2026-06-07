@@ -29,15 +29,15 @@ fn blur_h(img: &ImgF32, k: &[f32]) -> ImgF32 {
     let mut out = ImgF32::new(img.w, img.h);
     let row_stride = img.w * 4;
     let w = img.w;
+    let r_usize = r as usize;
+    let left_end = r_usize.min(w);
+    let right_start = (w.saturating_sub(r_usize)).max(left_end);
+
     out.data
         .par_chunks_exact_mut(row_stride)
         .enumerate()
         .for_each(|(y, row_out)| {
             let src_row = &img.data[y * row_stride..(y + 1) * row_stride];
-
-            let r_usize = r as usize;
-            let left_end = r_usize.min(w);
-            let right_start = (w.saturating_sub(r_usize)).max(left_end);
 
             // 1. Left edge: needs clamping
             for x in 0..left_end {
@@ -45,10 +45,9 @@ fn blur_h(img: &ImgF32, k: &[f32]) -> ImgF32 {
                 for (j, &kw) in k.iter().enumerate() {
                     let sx = (x as i64 + j as i64 - r).clamp(0, w as i64 - 1) as usize;
                     let si = sx * 4;
-                    acc[0] += src_row[si] * kw;
-                    acc[1] += src_row[si + 1] * kw;
-                    acc[2] += src_row[si + 2] * kw;
-                    acc[3] += src_row[si + 3] * kw;
+                    for c in 0..4 {
+                        acc[c] += src_row[si + c] * kw;
+                    }
                 }
                 let di = x * 4;
                 row_out[di..di + 4].copy_from_slice(&acc);
@@ -61,10 +60,9 @@ fn blur_h(img: &ImgF32, k: &[f32]) -> ImgF32 {
                 let src_ptr = &src_row[start_idx..start_idx + k.len() * 4];
                 for (j, &kw) in k.iter().enumerate() {
                     let si = j * 4;
-                    acc[0] += src_ptr[si] * kw;
-                    acc[1] += src_ptr[si + 1] * kw;
-                    acc[2] += src_ptr[si + 2] * kw;
-                    acc[3] += src_ptr[si + 3] * kw;
+                    for c in 0..4 {
+                        acc[c] += src_ptr[si + c] * kw;
+                    }
                 }
                 let di = x * 4;
                 row_out[di..di + 4].copy_from_slice(&acc);
@@ -76,10 +74,9 @@ fn blur_h(img: &ImgF32, k: &[f32]) -> ImgF32 {
                 for (j, &kw) in k.iter().enumerate() {
                     let sx = (x as i64 + j as i64 - r).clamp(0, w as i64 - 1) as usize;
                     let si = sx * 4;
-                    acc[0] += src_row[si] * kw;
-                    acc[1] += src_row[si + 1] * kw;
-                    acc[2] += src_row[si + 2] * kw;
-                    acc[3] += src_row[si + 3] * kw;
+                    for c in 0..4 {
+                        acc[c] += src_row[si + c] * kw;
+                    }
                 }
                 let di = x * 4;
                 row_out[di..di + 4].copy_from_slice(&acc);
@@ -92,19 +89,34 @@ fn blur_v(img: &ImgF32, k: &[f32]) -> ImgF32 {
     let r = (k.len() / 2) as i64;
     let mut out = ImgF32::new(img.w, img.h);
     let row_stride = img.w * 4;
+    let h = img.h;
+    let r_usize = r as usize;
+
+    let top_edge = r_usize.min(h);
+    let bottom_start = h.saturating_sub(r_usize).max(top_edge);
+
     out.data
         .par_chunks_exact_mut(row_stride)
         .enumerate()
         .for_each(|(y, row_out)| {
-            // Reorder loops: for each kernel tap, process the entire row horizontally.
-            // This ensures we read source pixels sequentially (sequential rows),
-            // improving cache locality significantly over per-pixel vertical strides.
-            for (j, &w) in k.iter().enumerate() {
-                let sy = (y as i64 + j as i64 - r).clamp(0, img.h as i64 - 1) as usize;
-                let src_row = &img.data[sy * row_stride..(sy + 1) * row_stride];
-                for (px_out, px_in) in row_out.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
-                    for c in 0..4 {
-                        px_out[c] += px_in[c] * w;
+            if y < top_edge || y >= bottom_start {
+                for (j, &w) in k.iter().enumerate() {
+                    let sy = (y as i64 + j as i64 - r).clamp(0, h as i64 - 1) as usize;
+                    let src_row = &img.data[sy * row_stride..(sy + 1) * row_stride];
+                    for (px_out, px_in) in row_out.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
+                        for c in 0..4 {
+                            px_out[c] += px_in[c] * w;
+                        }
+                    }
+                }
+            } else {
+                for (j, &w) in k.iter().enumerate() {
+                    let sy = y + j - r_usize;
+                    let src_row = &img.data[sy * row_stride..(sy + 1) * row_stride];
+                    for (px_out, px_in) in row_out.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
+                        for c in 0..4 {
+                            px_out[c] += px_in[c] * w;
+                        }
                     }
                 }
             }

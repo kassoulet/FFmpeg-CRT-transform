@@ -168,8 +168,9 @@ fn resample_axis(
                     for (i, &w) in c.weights.iter().enumerate() {
                         let sx = (c.start + i).min(src_w - 1);
                         let si = sx * 4;
+                        let src_px = &src_row[si..si + 4];
                         for c in 0..4 {
-                            acc[c] += src_row[si + c] * w;
+                            acc[c] += src_px[c] * w;
                         }
                     }
                     let di = x * 4;
@@ -179,18 +180,42 @@ fn resample_axis(
     } else {
         let src_row_stride = src_w * 4;
         let dst_row_stride = out_w * 4;
+
+        // Find middle section for vertical pass to avoid .min(src_h - 1)
+        let mut mid_start = out_h;
+        let mut mid_end = 0;
+        for (y, c) in contribs.iter().enumerate() {
+            let last_sy = c.start + c.weights.len().saturating_sub(1);
+            if last_sy < src_h {
+                if mid_start == out_h {
+                    mid_start = y;
+                }
+                mid_end = y + 1;
+            } else if mid_start != out_h {
+                break;
+            }
+        }
+
         out.par_chunks_exact_mut(dst_row_stride)
             .enumerate()
             .for_each(|(y, row_out)| {
                 let c = &contribs[y];
-                // Reorder loops: for each kernel tap, process the entire row horizontally.
-                for (i, &w) in c.weights.iter().enumerate() {
-                    let sy = (c.start + i).min(src_h - 1);
-                    let src_row = &src[sy * src_row_stride..(sy + 1) * src_row_stride];
-                    for (px_out, px_in) in row_out.chunks_exact_mut(4).zip(src_row.chunks_exact(4))
-                    {
-                        for c in 0..4 {
-                            px_out[c] += px_in[c] * w;
+                if y >= mid_start && y < mid_end {
+                    // Hot path: no vertical clamping
+                    for (i, &w) in c.weights.iter().enumerate() {
+                        let sy = c.start + i;
+                        let src_row = &src[sy * src_row_stride..(sy + 1) * src_row_stride];
+                        for (o, i) in row_out.iter_mut().zip(src_row.iter()) {
+                            *o += i * w;
+                        }
+                    }
+                } else {
+                    // Edges: need vertical clamping
+                    for (i, &w) in c.weights.iter().enumerate() {
+                        let sy = (c.start + i).min(src_h - 1);
+                        let src_row = &src[sy * src_row_stride..(sy + 1) * src_row_stride];
+                        for (o, i) in row_out.iter_mut().zip(src_row.iter()) {
+                            *o += i * w;
                         }
                     }
                 }
