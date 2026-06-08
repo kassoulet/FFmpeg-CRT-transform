@@ -42,7 +42,7 @@ than the ffcrt.sh reference on a 6-core machine.
 
 | ID | Item | Files | Effort | Notes |
 |----|------|-------|--------|-------|
-| B6 | Expand integration tests | `tests/basic.rs` | M | One test per preset family (color / mono / p7 / flat-panel / lcd); verify output file size and that no stage panics |
+| ~~B6~~ | ~~Expand integration tests~~ | ~~`tests/basic.rs`~~ | ~~M~~ | Done — cdfd5a4 |
 | B7 | `bench_full_pipeline` | `benches/ops.rs` | S | End-to-end benchmark on a synthetic 640×480 input through the color-PAL-TV preset; provides a single regression number |
 
 ### New CLI features
