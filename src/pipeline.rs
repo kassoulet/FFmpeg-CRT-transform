@@ -64,6 +64,9 @@ pub fn run(
     progress: Option<&dyn Fn(&str)>,
 ) -> Result<()> {
     let cfg = Config::load(cfg_path)?;
+    for warning in cfg.validate() {
+        eprintln!("crt-transform: warning: {warning}");
+    }
 
     // --- input probe -----------------------------------------------------
     let ext = input_path

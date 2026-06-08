@@ -92,6 +92,67 @@ mod tests {
     }
 
     #[test]
+    fn validate_clean_config_is_empty() {
+        let cfg = Config {
+            raw: HashMap::new(),
+        };
+        assert!(cfg.validate().is_empty());
+    }
+
+    #[test]
+    fn validate_prescale_zero_warns() {
+        let mut raw = HashMap::new();
+        raw.insert("PRESCALE_BY".into(), "0".into());
+        let cfg = Config { raw };
+        let w = cfg.validate();
+        assert!(!w.is_empty());
+        assert!(w[0].contains("PRESCALE_BY"));
+    }
+
+    #[test]
+    fn validate_sl_weight_zero_warns() {
+        let mut raw = HashMap::new();
+        raw.insert("SL_WEIGHT".into(), "0".into());
+        let cfg = Config { raw };
+        let w = cfg.validate();
+        assert!(w.iter().any(|s| s.contains("SL_WEIGHT")));
+    }
+
+    #[test]
+    fn validate_alpha_out_of_range_warns() {
+        let mut raw = HashMap::new();
+        raw.insert("OVL_ALPHA".into(), "1.5".into());
+        let cfg = Config { raw };
+        let w = cfg.validate();
+        assert!(w.iter().any(|s| s.contains("OVL_ALPHA")));
+    }
+
+    #[test]
+    fn validate_unknown_ofilter_warns() {
+        let mut raw = HashMap::new();
+        raw.insert("OFILTER".into(), "fancyfilter".into());
+        let cfg = Config { raw };
+        let w = cfg.validate();
+        assert!(w.iter().any(|s| s.contains("OFILTER")));
+    }
+
+    #[test]
+    fn validate_known_ofilter_is_silent() {
+        for name in &[
+            "neighbor",
+            "fast_bilinear",
+            "bilinear",
+            "bicubic",
+            "lanczos",
+        ] {
+            let mut raw = HashMap::new();
+            raw.insert("OFILTER".into(), (*name).into());
+            let cfg = Config { raw };
+            assert!(cfg.validate().is_empty(), "filter {name} should not warn");
+        }
+    }
+
+    #[test]
     fn derived_compute_simple() {
         // Simulate a minimal config
         let mut raw = HashMap::new();
@@ -182,6 +243,71 @@ impl Config {
             Some(s) => parse_frac(s).unwrap_or(default),
             None => default,
         }
+    }
+
+    /// Validate config values and return a list of human-readable warnings.
+    /// Warnings are non-fatal: the pipeline still runs, but results may be
+    /// unexpected. Returns an empty vec when everything looks sane.
+    pub fn validate(&self) -> Vec<String> {
+        let mut w: Vec<String> = Vec::new();
+
+        // PRESCALE_BY must be >= 1 (0 or negative collapses the canvas to zero).
+        let prescale = self.i64_or("PRESCALE_BY", 1);
+        if prescale < 1 {
+            w.push(format!(
+                "PRESCALE_BY={prescale} is < 1; canvas will be forced to PRESCALE_BY=1"
+            ));
+        }
+
+        // SL_WEIGHT is used as `1/weight` (division by zero if 0).
+        if let Some(s) = self.opt("SL_WEIGHT") {
+            if let Ok(v) = s.parse::<f64>() {
+                if v <= 0.0 {
+                    w.push(format!(
+                        "SL_WEIGHT={v} is <= 0; scanline profile will use 0.001 minimum"
+                    ));
+                }
+            }
+        }
+
+        // Opacity / alpha parameters should be in [0, 1].
+        for key in &[
+            "OVL_ALPHA",
+            "SL_ALPHA",
+            "HALATION_ALPHA",
+            "P_DECAY_ALPHA",
+            "PXGRID_ALPHA",
+        ] {
+            if let Some(s) = self.opt(key) {
+                if let Ok(v) = s.parse::<f64>() {
+                    if !(0.0..=1.0).contains(&v) {
+                        w.push(format!(
+                            "{key}={v} is outside [0, 1]; will be used as-is (may clip)"
+                        ));
+                    }
+                }
+            }
+        }
+
+        // OFILTER must be one of the known resize filter names.
+        const KNOWN_FILTERS: &[&str] = &[
+            "neighbor",
+            "fast_bilinear",
+            "bilinear",
+            "bicubic",
+            "lanczos",
+        ];
+        if let Some(s) = self.opt("OFILTER") {
+            if !KNOWN_FILTERS.contains(&s.to_ascii_lowercase().as_str()) {
+                w.push(format!(
+                    "OFILTER={s:?} is not recognised; will fall back to bicubic. \
+                     Known values: {}",
+                    KNOWN_FILTERS.join(", ")
+                ));
+            }
+        }
+
+        w
     }
 }
 
