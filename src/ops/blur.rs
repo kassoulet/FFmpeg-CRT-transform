@@ -39,8 +39,8 @@ fn blur_h(img: &ImgF32, k: &[f32]) -> ImgF32 {
         .for_each(|(y, row_out)| {
             let src_row = &img.data[y * row_stride..(y + 1) * row_stride];
 
-            // 1. Left edge: needs clamping
-            for x in 0..left_end {
+            // Edge pixels (left and right combined): clamp source index to [0, w-1].
+            for x in (0..left_end).chain(right_start..w) {
                 let mut acc = [0.0f32; 4];
                 for (j, &kw) in k.iter().enumerate() {
                     let sx = (x as i64 + j as i64 - r).clamp(0, w as i64 - 1) as usize;
@@ -49,11 +49,10 @@ fn blur_h(img: &ImgF32, k: &[f32]) -> ImgF32 {
                         acc[c] += src_row[si + c] * kw;
                     }
                 }
-                let di = x * 4;
-                row_out[di..di + 4].copy_from_slice(&acc);
+                row_out[x * 4..x * 4 + 4].copy_from_slice(&acc);
             }
 
-            // 2. Middle: no clamping needed, sequential source access
+            // Middle pixels: source indices always in range; use a contiguous slice.
             for x in left_end..right_start {
                 let mut acc = [0.0f32; 4];
                 let start_idx = (x - r_usize) * 4;
@@ -64,22 +63,7 @@ fn blur_h(img: &ImgF32, k: &[f32]) -> ImgF32 {
                         acc[c] += src_ptr[si + c] * kw;
                     }
                 }
-                let di = x * 4;
-                row_out[di..di + 4].copy_from_slice(&acc);
-            }
-
-            // 3. Right edge: needs clamping
-            for x in right_start..w {
-                let mut acc = [0.0f32; 4];
-                for (j, &kw) in k.iter().enumerate() {
-                    let sx = (x as i64 + j as i64 - r).clamp(0, w as i64 - 1) as usize;
-                    let si = sx * 4;
-                    for c in 0..4 {
-                        acc[c] += src_row[si + c] * kw;
-                    }
-                }
-                let di = x * 4;
-                row_out[di..di + 4].copy_from_slice(&acc);
+                row_out[x * 4..x * 4 + 4].copy_from_slice(&acc);
             }
         });
     out
@@ -87,38 +71,21 @@ fn blur_h(img: &ImgF32, k: &[f32]) -> ImgF32 {
 
 fn blur_v(img: &ImgF32, k: &[f32]) -> ImgF32 {
     let r = (k.len() / 2) as i64;
+    let h = img.h as i64;
     let mut out = ImgF32::new(img.w, img.h);
     let row_stride = img.w * 4;
-    let h = img.h;
-    let r_usize = r as usize;
-
-    let top_edge = r_usize.min(h);
-    let bottom_start = h.saturating_sub(r_usize).max(top_edge);
 
     out.data
         .par_chunks_exact_mut(row_stride)
         .enumerate()
         .for_each(|(y, row_out)| {
-            if y < top_edge || y >= bottom_start {
-                for (j, &w) in k.iter().enumerate() {
-                    let sy = (y as i64 + j as i64 - r).clamp(0, h as i64 - 1) as usize;
-                    let src_row = &img.data[sy * row_stride..(sy + 1) * row_stride];
-                    for (px_out, px_in) in row_out.chunks_exact_mut(4).zip(src_row.chunks_exact(4))
-                    {
-                        for c in 0..4 {
-                            px_out[c] += px_in[c] * w;
-                        }
-                    }
-                }
-            } else {
-                for (j, &w) in k.iter().enumerate() {
-                    let sy = y + j - r_usize;
-                    let src_row = &img.data[sy * row_stride..(sy + 1) * row_stride];
-                    for (px_out, px_in) in row_out.chunks_exact_mut(4).zip(src_row.chunks_exact(4))
-                    {
-                        for c in 0..4 {
-                            px_out[c] += px_in[c] * w;
-                        }
+            for (j, &w) in k.iter().enumerate() {
+                // clamp is a no-op for rows in the interior; correct for edge rows.
+                let sy = (y as i64 + j as i64 - r).clamp(0, h - 1) as usize;
+                let src_row = &img.data[sy * row_stride..(sy + 1) * row_stride];
+                for (px_out, px_in) in row_out.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
+                    for c in 0..4 {
+                        px_out[c] += px_in[c] * w;
                     }
                 }
             }
