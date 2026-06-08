@@ -84,17 +84,16 @@ fn blur_h(img: &ImgF32, k: &[f32]) -> ImgF32 {
             let src_row = &img.data[y * row_stride..(y + 1) * row_stride];
 
             // Edge pixels (left + right): clamp source index, then accumulate.
+            // Allocate a per-row gather buffer sized to the actual kernel length.
+            // (Sigma can be large, e.g. HALATION_RADIUS=60 → 361 taps; a fixed
+            // stack buffer would overflow.)
+            let mut buf = vec![0.0f32; k.len() * 4];
             for x in (0..left_end).chain(right_start..w) {
-                // Gather clamped source pixels into a contiguous stack buffer.
-                // Max kernel radius is ceil(36*3)=108; 4*(2*108+1)=868 floats worst-case.
-                // Practical sigmas stay well below 10 (radius ≤ 30, buffer ≤ 244 floats).
-                let mut buf = [0.0f32; 244];
-                debug_assert!(k.len() * 4 <= buf.len());
                 for (j, _) in k.iter().enumerate() {
                     let sx = (x as i64 + j as i64 - r).clamp(0, w as i64 - 1) as usize;
                     buf[j * 4..j * 4 + 4].copy_from_slice(&src_row[sx * 4..sx * 4 + 4]);
                 }
-                let acc = accum_rgba(&buf[..k.len() * 4], k);
+                let acc = accum_rgba(&buf, k);
                 row_out[x * 4..x * 4 + 4].copy_from_slice(&acc);
             }
 

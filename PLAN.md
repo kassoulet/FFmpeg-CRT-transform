@@ -8,21 +8,40 @@ than the ffcrt.sh reference on a 6-core machine.
 
 ---
 
-## Remaining Phase A work
+## Completed items
+
+| ID | Item | Commit |
+|----|------|--------|
+| A1 | Gamma LUT (4096-entry, ~10× speedup) | ee03c47 |
+| A2 | Gaussian kernel caching in `gblur_iso` | 814b9f0 |
+| A3 | Eliminate `step02.clone()` in `step03` | ee03c47 |
+| A4 | `ImgF32::for_each_row_mut` helper | ee03c47 |
+| A5 | Blur edge-loop consolidation + dynamic gather buffer | 1246755 / fc6e54f |
+| B1 | `Config::validate()` with range warnings | 5b4ca50 |
+| B2 | Early overlay-file existence check | ee03c47 |
+| B3 | Progress callback in `run()` | ee03c47 |
+| B4 | Monitor profile unit tests | ee03c47 |
+| B5 | Expanded bench coverage (gamma, blend, vignette) | ee03c47 |
+| SIMD | Investigated manual SSE2/FMA intrinsics — **reverted** | fc6e54f |
+
+> SIMD note: hand-written 128-bit SSE2 was 40% slower than the scalar loops
+> that LLVM auto-vectorizes to AVX2+FMA (256-bit) via `target-cpu=native`.
+> The scalar `accum_rgba` + `saxpy` structure was kept; the compiler wins.
+
+---
+
+## Remaining work
 
 ### Performance
 
 | ID | Item | Files | Effort | Notes |
 |----|------|-------|--------|-------|
-| A2 | Cache Gaussian kernels | `pipeline.rs`, `blur.rs` | S | `kernel(sigma)` is called 3–4× per run with the same sigma; compute once at pipeline start |
-| A4 | `ImgF32::for_each_row_mut` helper | `image_buf.rs`, all `ops/` | M | Extract the repeated `par_chunks_exact_mut` idiom; ~10 call sites to clean up |
-| A5 | Blur edge-loop consolidation | `ops/blur.rs` | S | `blur_h`/`blur_v` have three nearly-identical loops; unify with a clamped-index helper |
+| (none) | All profitable perf work done | — | — | rayon + AVX2 auto-vec + gamma LUT is the ceiling without data-layout changes |
 
 ### Code quality / DX
 
 | ID | Item | Files | Effort | Notes |
 |----|------|-------|--------|-------|
-| B1 | Config range validation | `config.rs` | S | Add `Config::validate() -> Vec<Warning>`; check `PRESCALE_BY ≥ 1`, alpha ranges 0..1, known `OFILTER` values; emit warnings, not hard errors |
 | B6 | Expand integration tests | `tests/basic.rs` | M | One test per preset family (color / mono / p7 / flat-panel / lcd); verify output file size and that no stage panics |
 | B7 | `bench_full_pipeline` | `benches/ops.rs` | S | End-to-end benchmark on a synthetic 640×480 input through the color-PAL-TV preset; provides a single regression number |
 
