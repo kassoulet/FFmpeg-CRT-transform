@@ -8,7 +8,7 @@
 use crate::image_buf::ImgF32;
 use rayon::prelude::*;
 
-fn kernel(sigma: f64) -> Vec<f32> {
+pub fn kernel(sigma: f64) -> Vec<f32> {
     let radius = (sigma * 3.0).ceil().max(1.0) as i64;
     let mut k = Vec::with_capacity((2 * radius + 1) as usize);
     let two_s2 = 2.0 * sigma * sigma;
@@ -141,8 +141,19 @@ pub fn gblur(img: &ImgF32, sigma_h: f64, sigma_v: f64) -> ImgF32 {
 }
 
 /// Isotropic blur convenience (halation, texture).
+/// Uses a single kernel for both axes (sigma_h == sigma_v).
 pub fn gblur_iso(img: &ImgF32, sigma: f64) -> ImgF32 {
-    gblur(img, sigma, sigma)
+    if sigma <= 0.1 {
+        return img.clone();
+    }
+    let k = kernel(sigma);
+    blur_v(&blur_h(img, &k), &k)
+}
+
+/// Blur with pre-computed kernels. Pass pre-computed kernels when the same
+/// sigma is reused across multiple calls (e.g. in a frame loop).
+pub fn gblur_precomputed(img: &ImgF32, kh: &[f32], kv: &[f32]) -> ImgF32 {
+    blur_v(&blur_h(img, kh), kv)
 }
 
 #[cfg(test)]
