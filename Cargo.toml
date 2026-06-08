@@ -1,5 +1,5 @@
 [package]
-name = "ffcrt"
+name = "crt-transform"
 version = "0.2.0"
 edition = "2021"
 description = "Native-Rust CRT / flat-panel monitor simulation — fast, configurable, no FFmpeg required"
@@ -10,11 +10,11 @@ keywords = ["crt", "monitor", "simulation", "image-processing", "retro"]
 categories = ["multimedia::images", "graphics"]
 
 [[bin]]
-name = "ffcrt"
+name = "crt-transform"
 path = "src/main.rs"
 
 [lib]
-name = "ffcrt"
+name = "crt_transform"
 path = "src/lib.rs"
 
 [dev-dependencies]

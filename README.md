@@ -1,4 +1,4 @@
-# ffcrt — native-Rust CRT / flat-panel monitor simulation
+# CRT Transform — native-Rust CRT / flat-panel monitor simulation
 
 A fast, configurable simulation of CRT monitors and older flat-panel displays,
 applied to still images. Written in pure Rust with **no external dependencies**
@@ -24,16 +24,16 @@ cargo run --release -- presets/color-PAL-TV.cfg input.png output.png
 cargo build --release
 
 # Run on a test image with a color CRT preset
-./target/release/ffcrt presets/color-PAL-TV.cfg test-suite/08.png /tmp/out.png
+./target/release/crt-transform presets/color-PAL-TV.cfg test-suite/08.png /tmp/out.png
 
 # Debug each pipeline stage
-./target/release/ffcrt --dump-stages /tmp/stages presets/color-PAL-TV.cfg test-suite/08.png /tmp/out.png
+./target/release/crt-transform --dump-stages /tmp/stages presets/color-PAL-TV.cfg test-suite/08.png /tmp/out.png
 ```
 
 ## Usage
 
 ```
-ffcrt <config.cfg> <input_image> [output_image]
+crt-transform <config.cfg> <input_image> [output_image]
 ```
 
 - `<config.cfg>` — a configuration file (see `presets/` for examples).
@@ -63,7 +63,7 @@ Key settings:
 ```
 Cargo.toml           # Crate metadata + dependencies
 src/
-  lib.rs             # Public API: ffcrt::run, ffcrt::ImgF32, ffcrt::Config
+  lib.rs             # Public API: crt_transform::run, crt_transform::ImgF32, crt_transform::Config
   main.rs            # CLI binary (thin wrapper over the library)
   config.rs          # .cfg parser
   image_buf.rs       # ImgF32 — universal f32 work buffer

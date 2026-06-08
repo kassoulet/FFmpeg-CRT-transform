@@ -103,7 +103,8 @@ fn blur_v(img: &ImgF32, k: &[f32]) -> ImgF32 {
                 for (j, &w) in k.iter().enumerate() {
                     let sy = (y as i64 + j as i64 - r).clamp(0, h as i64 - 1) as usize;
                     let src_row = &img.data[sy * row_stride..(sy + 1) * row_stride];
-                    for (px_out, px_in) in row_out.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
+                    for (px_out, px_in) in row_out.chunks_exact_mut(4).zip(src_row.chunks_exact(4))
+                    {
                         for c in 0..4 {
                             px_out[c] += px_in[c] * w;
                         }
@@ -113,7 +114,8 @@ fn blur_v(img: &ImgF32, k: &[f32]) -> ImgF32 {
                 for (j, &w) in k.iter().enumerate() {
                     let sy = y + j - r_usize;
                     let src_row = &img.data[sy * row_stride..(sy + 1) * row_stride];
-                    for (px_out, px_in) in row_out.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
+                    for (px_out, px_in) in row_out.chunks_exact_mut(4).zip(src_row.chunks_exact(4))
+                    {
                         for c in 0..4 {
                             px_out[c] += px_in[c] * w;
                         }

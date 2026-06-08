@@ -1,6 +1,6 @@
 # Performance and Profiling Guide
 
-This document outlines how to measure, analyze, and optimize the performance of the `ffcrt` Rust implementation.
+This document outlines how to measure, analyze, and optimize the performance of the `crt-transform` Rust implementation.
 
 ## 1. Benchmarking with Criterion
 

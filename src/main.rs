@@ -1,17 +1,17 @@
-//! `ffcrt` — native-Rust CRT / flat-panel monitor simulation.
+//! `crt-transform` — native-Rust CRT / flat-panel monitor simulation.
 //!
-//! Thin CLI wrapper over the `ffcrt` library. Phase A (still images) is
+//! Thin CLI wrapper over the `crt_transform` library. Phase A (still images) is
 //! implemented end-to-end with no external binary. Video (Phase B) is not
 //! yet wired up.
 
 use anyhow::{bail, Result};
 use clap::Parser;
-use ffcrt::pipeline;
+use crt_transform::pipeline;
 use std::path::{Path, PathBuf};
 
-/// FFmpeg CRT transform — native Rust port (VileR 2021, ported 2026).
+/// CRT Transform — native Rust port (VileR 2021, ported 2026).
 #[derive(Parser)]
-#[command(name = "ffcrt", about, long_about = None)]
+#[command(name = "crt-transform", about, long_about = None)]
 struct Cli {
     /// Configuration file (.cfg) — same format as the batch script presets
     config_file: PathBuf,
@@ -52,7 +52,7 @@ fn main() -> Result<()> {
     };
 
     eprintln!(
-        "ffcrt: {} + {} -> {}",
+        "crt-transform: {} + {} -> {}",
         cli.input_file.display(),
         cli.config_file.display(),
         output.display()

@@ -1,82 +1,93 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code when working with this repository.
 
 ## What this project is
 
-A configurable simulation of CRT monitors (and some older flat-panel displays) applied to an input image or video. There are **two implementations of the same pipeline**:
+A configurable simulation of CRT monitors (and some older flat-panel displays)
+applied to an input image, implemented as a native Rust crate (`crt-transform`). The
+original FFmpeg shell/batch scripts (`ffcrt.sh` / `ffcrt.bat`) are kept as a
+behavioural specification but the **Rust implementation is primary**.
 
-1. **Reference scripts** — `ffcrt.bat` (Windows) and `ffcrt.sh` (bash). These drive **FFmpeg** through ~9 sequential CLI invocations, each writing a `TMP*` intermediate file. This is the original, authoritative behaviour and handles both images and video. Requires a git-master FFmpeg build from 2021-01-27 or newer.
-2. **Native Rust port** — the `ffcrt` Cargo crate (`Cargo.toml` + `src/`). Reimplements the same visual pipeline as pure-Rust DSP **with no FFmpeg dependency**. Phase A (still images) is complete; video (Phase B) is not yet implemented. The port is the subject of `rust-claude.md` (the plan) and `rust-gemini.md`.
-
-Both consume the **same `.cfg` format**, so the 16 presets in `presets/` and the `test-suite/` configs work with either. The scripts remain the fidelity oracle for the Rust port.
-
-`sim-rgbi1bpp/` is a separate sidecar tool (1-bit display shading) and is out of scope for the Rust port.
+The library crate (`src/lib.rs`) exposes the full pipeline via `crt_transform::run`.
+The binary (`src/main.rs`) is a thin CLI wrapper. Still images (Phase A) are
+complete. Video (Phase B) is not yet implemented.
 
 ## Commands
 
-### Rust port (still images)
 ```bash
 cargo build --release
-# NOTE: this environment sets CARGO_TARGET_DIR=/home/gautier/target,
-# so the binary is at $CARGO_TARGET_DIR/release/ffcrt, not ./target/.
-ffcrt <config.cfg> <input_image> [output_image]    # output defaults to (input)_(config).(ext)
-ffcrt presets/color-PAL-TV.cfg test-suite/08.png /tmp/out.png
-ffcrt --dump-stages /tmp/stages presets/color-PAL-TV.cfg test-suite/08.png /tmp/out.png  # debug each stage
-cargo build && cargo clippy
+# NOTE: this environment sets CARGO_TARGET_DIR=/home/gautier/target
+# so the binary is at $CARGO_TARGET_DIR/release/crt-transform
+crt-transform <config.cfg> <input_image> [output_image]
+crt-transform --dump-stages /tmp/stages presets/color-PAL-TV.cfg test-suite/08.png /tmp/out.png
+
+cargo test                                  # tests/basic.rs drives the built CLI binary
+cargo test --test basic cli_accepts_png     # run a single integration test by name
+cargo run --example run_preset -- presets/color-PAL-TV.cfg test-suite/08.png  # uses crt_transform::run
+cargo bench                                 # criterion DSP micro-benchmarks → target/criterion/report
+cargo doc --open
+
+# CI / pre-commit gates (run before committing — see .pre-commit-config.yaml, .github/)
+cargo fmt -- --check
+cargo clippy -- -D warnings
 ```
-`--dump-stages <dir>` writes each pipeline boundary (`bezel`, `scanlines`, `shadowmask`, `grid`, `step01..03`) as a PNG — use it to bisect a divergence against the script's `TMP*` files.
 
-### Reference scripts
-```bash
-./ffcrt.sh <config.cfg> <input_image_or_video> [output]   # needs ffmpeg + ffprobe on PATH
-./test-suite/run-tests.sh                                  # runs the sample inputs/configs
-```
-To capture golden images from the reference for comparison, run `ffcrt.sh` over `presets/` + `test-suite/` inputs and diff against the Rust output (perceptual, not bit-exact — see fidelity notes).
+Library entry point is `crt_transform::run(&config_path, &input_path, &output_path, dump_stages_dir)`
+(see `examples/run_preset.rs`). Profiling is documented in `PROFILING.md` (the
+`profiling` crate + `profile-with-puffin` feature).
 
-## How the pipeline works (shared mental model)
+## Pipeline stages (still-image path)
 
-The transform is a fixed sequence of stages. The Rust functions in `src/pipeline.rs` map **1:1** onto the `# ---` comment sections of `ffcrt.sh` — read the two side by side. Order (still-image path):
+Functions in `src/pipeline.rs` map 1:1 onto `ffcrt.sh` sections:
 
-1. **Config + derived vars** — parse `.cfg`; compute `SXINT = IX*PRESCALE_BY`, `PX = IX*PRESCALE_BY*PX_ASPECT`, `PY = IY*PRESCALE_BY`, `OX = round(OY*OASPECT)`, `VSIGMA`, scan period/count, and `BEZEL_CURVATURE = max(BEZEL, CRT)`. `FLAT_PANEL=yes` forces scanlines/CRT-curvature/overlay **off**; non-`rgb` `MONITOR_COLOR` forces the shadowmask off. These derived integers must use **truncating integer arithmetic** to match bash `$(( ))` so canvas sizes line up.
-2. **Bezel** — white `PX×PY` canvas, optional rounded corners, optional bezel curvature.
-3. **Scanlines** — `sin^(1/SL_WEIGHT)` luminance profile, period `PRESCALE_BY/SCAN_FACTOR`, tiled to `PX×PY`, blurred + CRT-curved.
-4. **Shadowmask overlay** — only for `rgb`: load `_<OVL_TYPE>.png`, linearize, scale by `OVL_SCALE`, tile, blur + curve. (`_triad.png`/`_slot.png`/`_grille.png` live at the repo root and must be in the working dir.)
-5. **Pixel grid** — flat-panel only: discrete-pixel gap pattern, scaled to `PX` wide.
-6. **Step01** — neighbor prescale ×`PRESCALE_BY`, to-linear, aspect scale, grid blend, separable pixel blur (`H_PX_BLUR`/`VSIGMA`). **Works in linear light.**
-7. **Step02** — optional halation, back to gamma space, blackpoint lift, CRT curvature.
-8. **Step03** — optional bloom, multiply scanlines @`SL_ALPHA`, multiply shadowmask @`OVL_ALPHA`, multiply bezel, brighten. Skipped wholesale by a redundancy guard (no scanlines + equal curvatures + no corners + no overlay + brighten==1).
-9. **Output** — cropdetect the curved-white bounding box, crop, to-linear, monochrome gray+tint curves if applicable, scale to `OY*OASPECT − margins` preserving aspect with `OFILTER`, vignette, pad/center to `OX×OY`, paper/lcdgrain texture, quantize to 8/16bpc per `OFORMAT`.
+1. **Config + derived vars** — `config.rs` + `Derived::compute`; truncating integer math matches bash `$(( ))`.
+2. **Bezel** — white `PX×PY` canvas, optional rounded corners + curvature.
+3. **Scanlines** — `sin^(1/SL_WEIGHT)` profile → tile → blur → CRT-curve.
+4. **Shadowmask** — `_<OVL_TYPE>.png` → linearize → scale → tile → blur → curve → from-linear.
+5. **Pixel grid** — flat-panel only: gap pattern, gamma round-trip.
+6. **Step01** — neighbor prescale → to-linear → aspect scale → grid blend → separable pixel blur.
+7. **Step02** — optional halation → from-linear → blackpoint → CRT curvature.
+8. **Step03** — bloom → multiply scanlines/shadowmask/bezel → brighten. Redundancy guard skips when no-op.
+9. **Output** — cropdetect → crop → to-linear → gray+tint → resize → from-linear → vignette → pad/center → texture.
 
-### Gamma discipline (important and easy to get wrong)
-The pipeline repeatedly converts to "linear" (`x^2.2`) for spatial filtering and back (`x^(1/2.2)`) before gamma-space blends. Spatial ops (resample, blur, lens) happen in linear; the multiply/screen/lighten blends in step03 happen in gamma space. Match the script's conversions exactly — `src/ops/gamma.rs` is the single source.
+### Gamma discipline
+`x^2.2` for to-linear, `x^(1/2.2)` for from-linear. Spatial ops (resample, blur, lens) in linear space; multiply/screen/lighten blends in gamma space. See `src/ops/gamma.rs`.
 
 ### Blend semantics
-ffmpeg `blend`: **first input = bottom (B), second = top (A)**, and `all_opacity` mixes between the bottom and the blended result: `out = (1-op)*bottom + op*mode(top, bottom)` (so opacity 0 leaves the bottom untouched). `src/ops/blend.rs` follows this; preserve it when adding modes.
+ffmpeg convention: **first input = bottom (B), second = top (A)**. `out = (1-op)*B + op*mode(A, B)`. See `src/ops/blend.rs`.
 
-## Rust module map (`src/`)
+## Module map
 
-- `main.rs` — CLI (clap), input probe, dispatch. Bails clearly on video input.
-- `config.rs` — `.cfg` parser (`KEY value ; comment`) → `Config`; `Derived` computes the integer-truncated derived vars. `Frac` handles `num/den` values (`PX_ASPECT`, `OASPECT`).
-- `image_buf.rs` — `ImgF32`: interleaved RGBA `Vec<f32>` (0..1), the **universal work buffer**. Because everything is f32, `16BPC_PROCESSING` is internally irrelevant; bit depth only affects output quantization (`OFORMAT`).
-- `monitor.rs` — `MONITOR_COLOR` table: per-type tint `curves`, texture type, lcd grid inversion, p7 special case (the `case` block from `ffcrt.sh`).
-- `ops/` — DSP primitives, each shaped like the ffmpeg filter it replaces: `gamma`, `resample` (neighbor/bilinear/bicubic/lanczos/gauss, center-aligned, downscale anti-aliasing), `blur` (separable gaussian = `gblur`), `blend`, `curves` (natural cubic spline = `curves=`), `lens` (barrel distortion = `lenscorrection`), `vignette`, `crop` (`cropdetect`+`crop`), `generate` (corner mask / scanline profile / pixel grid / gray / blackpoint / brighten / negate), `noise` (seeded substrate texture).
-- `pipeline.rs` — orchestrates all stages in script order, passing in-memory `ImgF32` between them (no temp files). The plan's `src/stages/*.rs` tree is intentionally collapsed into the stage functions here.
+| Module | Purpose |
+|--------|---------|
+| `lib.rs` | Public API re-exports (`crt_transform::run`, `crt_transform::ImgF32`, `crt_transform::Config`) |
+| `main.rs` | CLI binary (clap) — thin wrapper |
+| `config.rs` | `.cfg` parser → `Config`; `Derived` for integer-truncated derived vars |
+| `image_buf.rs` | `ImgF32` — interleaved RGBA `Vec<f32>`, the universal work buffer |
+| `monitor.rs` | `MONITOR_COLOR` table: tint curves, texture type, grid inversion |
+| `pipeline.rs` | Orchestrator — all 9 stages in order, no temp files |
+| `ops/` | DSP primitives: blur, blend, resample, lens, curves, gamma, crop, vignette, generate, noise |
 
 ## Fidelity expectations
 
-Output is **perceptually equivalent, not bit-identical** to the FFmpeg reference. Known sources of divergence, by design:
-- Our resampler/blur kernels are hand-written; ffmpeg's exact lanczos/bicubic/`gblur` IIR differ slightly.
-- The scanline/shadowmask curvature step skips the script's ×3 supersample (done at native res) to bound memory at large `PRESCALE_BY`.
-- `noise`-based textures (paper/lcdgrain) use a different PRNG, so grain detail differs.
-- `lenscorrection`/`vignette` use standard models, not ffmpeg's exact internal formulas.
+Output is **perceptually equivalent, not bit-identical** to the FFmpeg reference.
+Known divergences by design:
+- Hand-written resample/blur kernels differ from ffmpeg's internals.
+- Curvature step skips the ×3 supersample (done at native res to bound memory).
+- Noise-based textures use a different PRNG.
+- `lenscorrection`/`vignette` use standard models, not ffmpeg's formulas.
 
-When changing DSP, validate against script output with `--dump-stages` and eyeball one preset per family (color / mono / p7 / flat-panel / lcd).
+Validate with `--dump-stages` against the script's `TMP*` files, testing one
+preset per family (color / mono / p7 / flat-panel / lcd).
 
-## Performance note
+## Performance
 
-The Rust port is single-threaded and works on full `PX×PY` f32 buffers (e.g. `color-PAL-TV` on 640×480 → 6400×4800 ≈ 0.5 GB/buffer, ~2 min). Per-row parallelism (rayon) over the resample/blur/lens loops is the obvious optimization and is the first thing to reach for if speed matters.
+All DSP ops use per-row rayon parallelism. On a 6-core / 12-thread CPU the
+Rust port is 3–11× faster than the FFmpeg reference. See `benchmark.md`.
 
 ## Not yet implemented (Phase B)
 
-Video and all temporal effects (`tmix`, `lagfun`, `LATENCY`, p7 decay/latency for video). Pure-Rust H.264 is impractical; the planned approach pipes `rawvideo` frames through the `ffmpeg` binary as a dumb codec I/O layer while keeping all per-frame DSP native. See `rust-claude.md`.
+Video and temporal effects (`tmix`, `lagfun`, `LATENCY`, p7 decay for video).
+Planned approach: pipe rawvideo frames through the `ffmpeg` binary as a codec
+I/O layer while keeping per-frame DSP native.

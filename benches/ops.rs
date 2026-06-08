@@ -4,8 +4,8 @@
 //!   cargo bench
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use ffcrt::image_buf::ImgF32;
-use ffcrt::ops::{blur, lens, resample};
+use crt_transform::image_buf::ImgF32;
+use crt_transform::ops::{blur, lens, resample};
 
 fn img_small() -> ImgF32 {
     ImgF32::filled(640, 480, [0.5, 0.5, 0.5, 1.0])
