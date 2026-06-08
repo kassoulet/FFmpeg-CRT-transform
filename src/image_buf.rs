@@ -67,6 +67,20 @@ impl ImgF32 {
         });
     }
 
+    /// Apply `f(row_index, row_pixels)` to every row in parallel.
+    /// Each row slice has length `w * 4` (RGBA interleaved).
+    pub fn for_each_row_mut<F>(&mut self, f: F)
+    where
+        F: Fn(usize, &mut [f32]) + Send + Sync,
+    {
+        use rayon::prelude::*;
+        let w = self.w;
+        self.data
+            .par_chunks_exact_mut(w * 4)
+            .enumerate()
+            .for_each(|(y, row)| f(y, row));
+    }
+
     /// Load an image file as RGBA f32 (0..1). 8- and 16-bit sources are both
     /// normalized; alpha defaults to opaque when the source has none.
     pub fn load(path: &Path) -> Result<Self> {

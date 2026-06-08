@@ -6,7 +6,6 @@
 //! so opacity=0 leaves the bottom input untouched.
 
 use crate::image_buf::ImgF32;
-use rayon::prelude::*;
 
 #[inline]
 fn multiply(top: f32, bot: f32) -> f32 {
@@ -72,51 +71,43 @@ impl Mode {
 /// `top` may be a different size; pixels beyond its extent repeat the edge
 /// (mimics `eof_action=repeat` / equal-size inputs in the script).
 pub fn blend(bottom: &mut ImgF32, top: &ImgF32, mode: Mode, opacity: f32) {
-    let row_stride = bottom.w * 4;
-    bottom
-        .data
-        .par_chunks_exact_mut(row_stride)
-        .enumerate()
-        .for_each(|(y, row)| {
-            let ty = y.min(top.h - 1);
-            for x in 0..bottom.w {
-                let tx = x.min(top.w - 1);
-                let di = x * 4;
-                let b = [row[di], row[di + 1], row[di + 2], row[di + 3]];
-                let t = top.get(tx, ty);
-                for c in 0..3 {
-                    let blended = mode.apply(t[c], b[c]);
-                    row[di + c] = (1.0 - opacity) * b[c] + opacity * blended;
-                }
+    let w = bottom.w;
+    bottom.for_each_row_mut(|y, row| {
+        let ty = y.min(top.h - 1);
+        for x in 0..w {
+            let tx = x.min(top.w - 1);
+            let di = x * 4;
+            let b = [row[di], row[di + 1], row[di + 2], row[di + 3]];
+            let t = top.get(tx, ty);
+            for c in 0..3 {
+                let blended = mode.apply(t[c], b[c]);
+                row[di + c] = (1.0 - opacity) * b[c] + opacity * blended;
             }
-        });
+        }
+    });
 }
 
 /// Scanline bloom: `blend=all_expr='if(gte(A,RNG/2), B+(1-B)*power*(A-.5)/.5, B)'`.
 /// `bottom` (B) = desaturated image, `top` (A) = scanline luminance.
 pub fn bloom_expr(bottom: &mut ImgF32, top: &ImgF32, power: f32) {
-    let row_stride = bottom.w * 4;
-    bottom
-        .data
-        .par_chunks_exact_mut(row_stride)
-        .enumerate()
-        .for_each(|(y, row)| {
-            let ty = y.min(top.h - 1);
-            for x in 0..bottom.w {
-                let tx = x.min(top.w - 1);
-                let di = x * 4;
-                let b = [row[di], row[di + 1], row[di + 2], row[di + 3]];
-                let t = top.get(tx, ty);
-                for c in 0..3 {
-                    let a = t[c];
-                    row[di + c] = if a >= 0.5 {
-                        b[c] + (1.0 - b[c]) * power * (a - 0.5) / 0.5
-                    } else {
-                        b[c]
-                    };
-                }
+    let w = bottom.w;
+    bottom.for_each_row_mut(|y, row| {
+        let ty = y.min(top.h - 1);
+        for x in 0..w {
+            let tx = x.min(top.w - 1);
+            let di = x * 4;
+            let b = [row[di], row[di + 1], row[di + 2], row[di + 3]];
+            let t = top.get(tx, ty);
+            for c in 0..3 {
+                let a = t[c];
+                row[di + c] = if a >= 0.5 {
+                    b[c] + (1.0 - b[c]) * power * (a - 0.5) / 0.5
+                } else {
+                    b[c]
+                };
             }
-        });
+        }
+    });
 }
 
 #[cfg(test)]

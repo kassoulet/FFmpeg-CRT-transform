@@ -6,7 +6,6 @@
 //! the frame and the crop is a no-op.
 
 use crate::image_buf::ImgF32;
-use rayon::prelude::*;
 
 pub struct Rect {
     pub x: usize,
@@ -67,17 +66,13 @@ pub fn crop(img: &ImgF32, r: &Rect) -> ImgF32 {
     let w = r.w.min(img.w - r.x);
     let h = r.h.min(img.h - r.y);
     let mut out = ImgF32::new(w, h);
-    let row_stride = w * 4;
-    out.data
-        .par_chunks_exact_mut(row_stride)
-        .enumerate()
-        .for_each(|(y, row)| {
-            for x in 0..w {
-                let p = img.get(r.x + x, r.y + y);
-                let di = x * 4;
-                row[di..di + 4].copy_from_slice(&p);
-            }
-        });
+    out.for_each_row_mut(|y, row| {
+        for x in 0..w {
+            let p = img.get(r.x + x, r.y + y);
+            let di = x * 4;
+            row[di..di + 4].copy_from_slice(&p);
+        }
+    });
     out
 }
 

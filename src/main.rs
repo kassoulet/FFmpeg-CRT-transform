@@ -57,7 +57,13 @@ fn main() -> Result<()> {
         cli.config_file.display(),
         output.display()
     );
-    pipeline::run(&cli.config_file, &cli.input_file, &output, cli.dump_stages)?;
+    pipeline::run(
+        &cli.config_file,
+        &cli.input_file,
+        &output,
+        cli.dump_stages,
+        Some(&|stage| eprintln!("[{stage}]")),
+    )?;
     eprintln!("Done: {}", output.display());
     Ok(())
 }

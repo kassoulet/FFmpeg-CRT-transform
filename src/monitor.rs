@@ -8,7 +8,7 @@
 
 use crate::ops::curves::Curves;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Texture {
     None,
     Paper,
@@ -123,5 +123,69 @@ impl Monitor {
         }
 
         m
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rgb_is_color_no_curves() {
+        let m = Monitor::resolve("rgb", 0);
+        assert!(m.is_color);
+        assert!(m.curves.is_none());
+        assert!(!m.is_p7);
+        assert!(!m.pxgrid_invert);
+    }
+
+    #[test]
+    fn p7_has_both_curve_sets() {
+        let m = Monitor::resolve("p7", 0);
+        assert!(m.is_p7);
+        assert!(!m.is_color);
+        assert!(m.p7_lat.is_some());
+        assert!(m.p7_dec.is_some());
+    }
+
+    #[test]
+    fn lcd_inverts_pixel_grid() {
+        for name in &["lcd", "lcd-lite", "lcd-lwhite", "lcd-lblue"] {
+            let m = Monitor::resolve(name, 0);
+            assert!(m.pxgrid_invert, "{name} should invert pixel grid");
+            assert!(m.curves.is_some(), "{name} should have tint curves");
+        }
+    }
+
+    #[test]
+    fn lcd_grain_applied_only_when_positive() {
+        assert_eq!(Monitor::resolve("lcd", 0).texture, Texture::None);
+        assert_eq!(Monitor::resolve("lcd", 1).texture, Texture::LcdGrain);
+    }
+
+    #[test]
+    fn unknown_monitor_is_monochrome_no_crash() {
+        let m = Monitor::resolve("unknown-type", 0);
+        assert!(!m.is_color);
+        assert!(!m.is_p7);
+        assert!(m.curves.is_none());
+    }
+
+    #[test]
+    fn case_insensitive() {
+        let lower = Monitor::resolve("amber", 0);
+        let upper = Monitor::resolve("AMBER", 0);
+        assert_eq!(lower.is_color, upper.is_color);
+        assert_eq!(lower.pxgrid_invert, upper.pxgrid_invert);
+        // Both have curves
+        assert!(lower.curves.is_some());
+        assert!(upper.curves.is_some());
+    }
+
+    #[test]
+    fn paperwhite_has_paper_texture() {
+        let m = Monitor::resolve("paperwhite", 0);
+        assert_eq!(m.texture, Texture::Paper);
+        assert!(!m.is_color);
     }
 }

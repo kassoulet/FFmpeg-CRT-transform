@@ -73,23 +73,19 @@ pub fn pixel_grid(
     let mut img = ImgF32::new(w, h);
     let gx = gx.max(1);
     let gy = gy.max(1);
-    let row_stride = w * 4;
-    img.data
-        .par_chunks_exact_mut(row_stride)
-        .enumerate()
-        .for_each(|(y, row)| {
-            let in_gap_y = gy >= gap_y && (y % gy) >= gx_sub(gy, gap_y);
-            for x in 0..w {
-                let in_gap_x = gx >= gap_x && (x % gx) >= gx_sub(gx, gap_x);
-                let lum = if in_gap_x || in_gap_y {
-                    lum_gap
-                } else {
-                    lum_px
-                };
-                let di = x * 4;
-                row[di..di + 4].copy_from_slice(&[lum, lum, lum, 1.0]);
-            }
-        });
+    img.for_each_row_mut(|y, row| {
+        let in_gap_y = gy >= gap_y && (y % gy) >= gx_sub(gy, gap_y);
+        for x in 0..w {
+            let in_gap_x = gx >= gap_x && (x % gx) >= gx_sub(gx, gap_x);
+            let lum = if in_gap_x || in_gap_y {
+                lum_gap
+            } else {
+                lum_px
+            };
+            let di = x * 4;
+            row[di..di + 4].copy_from_slice(&[lum, lum, lum, 1.0]);
+        }
+    });
     img
 }
 

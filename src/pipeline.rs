@@ -24,16 +24,17 @@ use crate::ops::{
 use rayon::prelude::*;
 
 /// Bundle of everything the stages read, resolved once.
-struct Ctx {
+struct Ctx<'p> {
     cfg: Config,
     d: Derived,
     mon: Monitor,
     scanlines_on: bool,
     ovl_alpha: f64,
     dump: Option<PathBuf>,
+    progress: Option<&'p dyn Fn(&str)>,
 }
 
-impl Ctx {
+impl Ctx<'_> {
     fn dump(&self, name: &str, img: &ImgF32) {
         if let Some(dir) = &self.dump {
             let _ = std::fs::create_dir_all(dir);
@@ -42,13 +43,25 @@ impl Ctx {
             eprintln!("  [dump] {}", p.display());
         }
     }
+
+    fn progress(&self, stage: &str) {
+        if let Some(f) = self.progress {
+            f(stage);
+        }
+    }
 }
 
+/// Run the full still-image pipeline.
+///
+/// `progress` is an optional callback called with a short stage name before
+/// each major stage begins (e.g. `"bezel"`, `"step01"`, `"output"`). Pass
+/// `None` for no-op, or `Some(&|s| eprintln!("[{s}]"))` for simple logging.
 pub fn run(
     cfg_path: &Path,
     input_path: &Path,
     output_path: &Path,
     dump: Option<PathBuf>,
+    progress: Option<&dyn Fn(&str)>,
 ) -> Result<()> {
     let cfg = Config::load(cfg_path)?;
 
@@ -82,6 +95,18 @@ pub fn run(
         cfg.f64_or("OVL_ALPHA", 0.0)
     };
 
+    // Early check: overlay file must exist before we start the pipeline.
+    if ovl_alpha > 0.0 {
+        let ovl_type = cfg.str_or("OVL_TYPE", "triad");
+        let mask_path = std::path::PathBuf::from(format!("_{ovl_type}.png"));
+        if !mask_path.exists() {
+            bail!(
+                "Shadow mask overlay '_{ovl_type}.png' not found in the working directory. \
+                 Place the overlay file next to the input or set OVL_ALPHA=0 to disable it."
+            );
+        }
+    }
+
     let ctx = Ctx {
         cfg,
         d,
@@ -89,6 +114,7 @@ pub fn run(
         scanlines_on,
         ovl_alpha,
         dump,
+        progress,
     };
 
     // INVERT_INPUT (negate). Temporal pre-process is video-only and skipped.
@@ -97,10 +123,12 @@ pub fn run(
     }
 
     // --- build the static layers ----------------------------------------
+    ctx.progress("bezel");
     let bezel = build_bezel(&ctx);
     ctx.dump("bezel", &bezel);
 
     let scanlines = if ctx.scanlines_on {
+        ctx.progress("scanlines");
         let s = build_scanlines(&ctx);
         ctx.dump("scanlines", &s);
         Some(s)
@@ -108,10 +136,12 @@ pub fn run(
         None
     };
 
+    ctx.progress("shadowmask");
     let shadowmask = build_shadowmask(&ctx)?;
     ctx.dump("shadowmask", &shadowmask);
 
     let grid = if ctx.d.flat_panel {
+        ctx.progress("grid");
         let g = build_grid(&ctx);
         ctx.dump("grid", &g);
         Some(g)
@@ -120,15 +150,19 @@ pub fn run(
     };
 
     // --- the per-image processing chain ---------------------------------
+    ctx.progress("step01");
     let step01 = step01(&ctx, &img, grid.as_ref());
     ctx.dump("step01", &step01);
 
+    ctx.progress("step02");
     let step02 = step02(&ctx, step01);
     ctx.dump("step02", &step02);
 
+    ctx.progress("step03");
     let step03 = step03(&ctx, step02, scanlines.as_ref(), &shadowmask, &bezel);
     ctx.dump("step03", &step03);
 
+    ctx.progress("output");
     let out = output(&ctx, step03)?;
     out.save(output_path, ctx.d.output_bpc)?;
     Ok(())
@@ -163,17 +197,13 @@ fn build_scanlines(ctx: &Ctx) -> ImgF32 {
     let px = ctx.d.px as usize;
     let py = ctx.d.py as usize;
     let mut s = ImgF32::new(px, py);
-    let row_stride = px * 4;
-    s.data
-        .par_chunks_exact_mut(row_stride)
-        .enumerate()
-        .for_each(|(y, row)| {
-            let lum = col.get(0, y % period);
-            for x in 0..px {
-                let di = x * 4;
-                row[di..di + 4].copy_from_slice(&lum);
-            }
-        });
+    s.for_each_row_mut(|y, row| {
+        let lum = col.get(0, y % period);
+        for x in 0..px {
+            let di = x * 4;
+            row[di..di + 4].copy_from_slice(&lum);
+        }
+    });
     // Soften + apply CRT curvature (script supersamples x3 for quality; we blur
     // at native res, see CLAUDE.md fidelity notes).
     s = blur::gblur_iso(&s, 0.8);
@@ -207,20 +237,15 @@ fn build_shadowmask(ctx: &Ctx) -> Result<ImgF32> {
 
     // tile to cover PXxPY
     let mut tiled = ImgF32::new(px, py);
-    let row_stride = px * 4;
-    tiled
-        .data
-        .par_chunks_exact_mut(row_stride)
-        .enumerate()
-        .for_each(|(y, row)| {
-            let sy = y % mh;
-            for x in 0..px {
-                let sx = x % mw;
-                let p = mask.get(sx, sy);
-                let di = x * 4;
-                row[di..di + 4].copy_from_slice(&p);
-            }
-        });
+    tiled.for_each_row_mut(|y, row| {
+        let sy = y % mh;
+        for x in 0..px {
+            let sx = x % mw;
+            let p = mask.get(sx, sy);
+            let di = x * 4;
+            row[di..di + 4].copy_from_slice(&p);
+        }
+    });
     tiled = blur::gblur_iso(&tiled, 1.0);
     if ctx.d.crt_curvature != 0.0 {
         tiled = lens::lenscorrection(&tiled, ctx.d.crt_curvature, ctx.d.crt_curvature);
@@ -330,22 +355,25 @@ fn step03(
         return step02;
     }
 
-    let mut cur = step02.clone();
-
-    if let Some(scanlines) = scanlines {
-        // bloom: build the multiply texture from a desaturated copy of step02
-        let sl_tex = if ctx.cfg.yes("BLOOM_ON") {
+    // Compute the scanline texture before consuming step02, so bloom can clone
+    // it without paying for an extra full-image copy in the non-bloom path.
+    let sl_tex = scanlines.map(|sl| {
+        if ctx.cfg.yes("BLOOM_ON") {
             let power = ctx.cfg.f64_or("BLOOM_POWER", 0.0) as f32;
             let mut desat = step02.clone();
             gamma::to_linear(&mut desat);
             generate::to_gray(&mut desat);
             gamma::from_linear(&mut desat);
-            // bottom = desat, top = scanlines
-            blend::bloom_expr(&mut desat, scanlines, power);
+            blend::bloom_expr(&mut desat, sl, power);
             desat
         } else {
-            scanlines.clone()
-        };
+            sl.clone()
+        }
+    });
+
+    let mut cur = step02; // move — no clone needed here
+
+    if let Some(sl_tex) = sl_tex {
         let sl_alpha = ctx.cfg.f64_or("SL_ALPHA", 1.0) as f32;
         blend::blend(&mut cur, &sl_tex, Mode::Multiply, sl_alpha);
     }
@@ -430,9 +458,10 @@ fn output(ctx: &Ctx, step03: ImgF32) -> Result<ImgF32> {
 
 fn apply_mono_tint(ctx: &Ctx, img: &mut ImgF32) {
     if ctx.mon.is_p7 {
-        // p7 still: split -> lat curves, decay curves, lighten, screen w/ orig
+        // p7 still: split -> lat curves, decay curves, lighten, screen w/ orig.
+        // img acts as "orig" — we blend the result back into it at the end,
+        // saving one full-image clone vs keeping a separate `orig` copy.
         let p_decay_alpha = ctx.cfg.f64_or("P_DECAY_ALPHA", 0.3) as f32;
-        let orig = img.clone();
         let mut lat = img.clone();
         if let Some(c) = &ctx.mon.p7_lat {
             c.apply(&mut lat);
@@ -442,9 +471,7 @@ fn apply_mono_tint(ctx: &Ctx, img: &mut ImgF32) {
             c.apply(&mut decay);
         }
         blend::blend(&mut lat, &decay, Mode::Lighten, p_decay_alpha);
-        let mut out = orig;
-        blend::blend(&mut out, &lat, Mode::Screen, 1.0);
-        *img = out;
+        blend::blend(img, &lat, Mode::Screen, 1.0);
     } else if let Some(c) = &ctx.mon.curves {
         c.apply(img);
     }
@@ -489,8 +516,8 @@ fn apply_lcdgrain(ctx: &Ctx, out: &mut ImgF32) {
     let tex = noise::gray_noise(gx, gy, 5150, grain);
     let tex = resample::resize(&tex, out.w, out.h, Filter::Lanczos);
 
-    // notquite = vividlight(top=image, bottom=tex)
-    let mut notquite = tex.clone();
+    // notquite = vividlight(top=image, bottom=tex); tex is moved here (no clone)
+    let mut notquite = tex;
     blend::blend(&mut notquite, out, Mode::VividLight, 1.0);
     // fix = clamp(image, 0, 110/256); out = lighten(top=notquite, bottom=fix)
     let lim = 110.0 / 256.0;

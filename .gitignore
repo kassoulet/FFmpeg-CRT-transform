@@ -8,3 +8,4 @@ test-suite/*-ff-out.png
 test-suite/*-rust-out.png
 test-suite/*-OLD.*
 CLAUDE.md
+.cargo/config.toml

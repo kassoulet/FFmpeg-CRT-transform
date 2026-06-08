@@ -18,6 +18,6 @@ fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("out.png"));
 
-    crt_transform::run(&config, &input, &output, None).unwrap();
+    crt_transform::run(&config, &input, &output, None, None).unwrap();
     eprintln!("Written to {}", output.display());
 }
