@@ -160,25 +160,41 @@ fn cli_rejects_video_input() {
 }
 
 // ---------------------------------------------------------------------------
-// One full-pipeline smoke test per preset family
+// Fast per-family smoke tests  (PRESCALE_BY=2, OY=480 — run in <5 s each)
+// These run as part of the default `cargo test` suite.
 // ---------------------------------------------------------------------------
 
-/// Color family — RGB shadowmask + scanlines.
+/// Color family — RGB shadowmask + scanlines (fast config).
 #[test]
-fn cli_runs_color_preset() {
-    run_preset_test("test-suite/08cfg.cfg", "test-suite/08.png", "color", 1000);
+fn cli_runs_color_fast() {
+    run_preset_test(
+        "benches/color-fast.cfg",
+        "test-suite/08.png",
+        "color-fast",
+        1000,
+    );
 }
 
-/// Mono family — paperwhite tint, no shadowmask.
+/// Mono family — paperwhite tint, scanlines, halation (fast config).
 #[test]
-fn cli_runs_mono_preset() {
-    run_preset_test("test-suite/06cfg.cfg", "test-suite/06.png", "mono", 1000);
+fn cli_runs_mono_fast() {
+    run_preset_test(
+        "test-suite/mono-fast.cfg",
+        "test-suite/06.png",
+        "mono-fast",
+        1000,
+    );
 }
 
-/// Mono-amber family — amber tint, scanlines.
+/// Amber mono family — non-square pixels, fat-beam scanlines (fast config).
 #[test]
-fn cli_runs_amber_preset() {
-    run_preset_test("test-suite/09cfg.cfg", "test-suite/09.png", "amber", 1000);
+fn cli_runs_amber_fast() {
+    run_preset_test(
+        "test-suite/amber-fast.cfg",
+        "test-suite/09.png",
+        "amber-fast",
+        1000,
+    );
 }
 
 /// P7 family — dual-phosphor path with special curve handling.
@@ -194,6 +210,49 @@ fn cli_runs_fpanel_preset() {
         "test-suite/fpanel-fast.cfg",
         "test-suite/08.png",
         "fpanel",
+        1000,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Reference-fidelity tests  (PRESCALE_BY 5–6, OY up to 2160 — each >60 s)
+// Run with: cargo test -- --ignored
+// These validate output against the full-resolution test-suite configs and
+// are intended for CI on PRs, not for routine development.
+// ---------------------------------------------------------------------------
+
+/// Color — full-resolution reference config (08cfg: PRESCALE_BY=5, OY=1080).
+#[test]
+#[ignore = "slow: ~3 min; run with: cargo test -- --ignored"]
+fn cli_runs_color_preset_ref() {
+    run_preset_test(
+        "test-suite/08cfg.cfg",
+        "test-suite/08.png",
+        "color-ref",
+        1000,
+    );
+}
+
+/// Mono — full-resolution reference config (06cfg: PRESCALE_BY=5, OY=1080, HALATION_RADIUS=60).
+#[test]
+#[ignore = "slow: ~3 min; run with: cargo test -- --ignored"]
+fn cli_runs_mono_preset_ref() {
+    run_preset_test(
+        "test-suite/06cfg.cfg",
+        "test-suite/06.png",
+        "mono-ref",
+        1000,
+    );
+}
+
+/// Amber — full-resolution reference config (09cfg: PRESCALE_BY=6, OY=2160).
+#[test]
+#[ignore = "slow: ~5 min; run with: cargo test -- --ignored"]
+fn cli_runs_amber_preset_ref() {
+    run_preset_test(
+        "test-suite/09cfg.cfg",
+        "test-suite/09.png",
+        "amber-ref",
         1000,
     );
 }
