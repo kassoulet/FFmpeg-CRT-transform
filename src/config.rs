@@ -144,6 +144,7 @@ mod tests {
             "bilinear",
             "bicubic",
             "lanczos",
+            "gauss",
         ] {
             let mut raw = HashMap::new();
             raw.insert("OFILTER".into(), (*name).into());
@@ -245,6 +246,17 @@ impl Config {
         }
     }
 
+    /// Return all key-value pairs, sorted by key.  Used by `--validate`.
+    pub fn entries(&self) -> Vec<(&str, &str)> {
+        let mut pairs: Vec<(&str, &str)> = self
+            .raw
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        pairs.sort_by_key(|(k, _)| *k);
+        pairs
+    }
+
     /// Validate config values and return a list of human-readable warnings.
     /// Warnings are non-fatal: the pipeline still runs, but results may be
     /// unexpected. Returns an empty vec when everything looks sane.
@@ -296,6 +308,7 @@ impl Config {
             "bilinear",
             "bicubic",
             "lanczos",
+            "gauss",
         ];
         if let Some(s) = self.opt("OFILTER") {
             if !KNOWN_FILTERS.contains(&s.to_ascii_lowercase().as_str()) {

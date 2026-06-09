@@ -26,6 +26,52 @@ fn run_preset_test(cfg: &str, input: &str, tag: &str, min_bytes: u64) {
 }
 
 // ---------------------------------------------------------------------------
+// --validate tests (fast, no image processing)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn validate_clean_preset_exits_zero() {
+    // test-suite/08cfg.cfg has no validation warnings.
+    let out = bin()
+        .arg("test-suite/08cfg.cfg")
+        .arg("--validate")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Warnings: none"));
+}
+
+#[test]
+fn validate_prints_all_keys() {
+    let out = bin()
+        .arg("test-suite/08cfg.cfg")
+        .arg("--validate")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("MONITOR_COLOR"));
+    assert!(stdout.contains("PRESCALE_BY"));
+    assert!(stdout.contains("OVL_TYPE"));
+}
+
+#[test]
+fn validate_overlay_ok_when_present() {
+    let out = bin()
+        .arg("test-suite/08cfg.cfg")
+        .arg("--validate")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("OK"));
+}
+
+// ---------------------------------------------------------------------------
 // Error-handling tests (fast)
 // ---------------------------------------------------------------------------
 
