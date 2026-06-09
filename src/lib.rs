@@ -3,6 +3,7 @@ pub mod image_buf;
 pub mod monitor;
 pub mod ops;
 pub mod pipeline;
+pub mod video;
 
 pub use config::Config;
 pub use image_buf::ImgF32;
