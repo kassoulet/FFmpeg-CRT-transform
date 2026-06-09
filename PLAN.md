@@ -34,24 +34,25 @@ than the ffcrt.sh reference on a 6-core machine.
 
 ### Performance
 
-| ID | Item | Files | Effort | Notes |
-|----|------|-------|--------|-------|
-| (none) | All profitable perf work done | — | — | rayon + AVX2 auto-vec + gamma LUT is the ceiling without data-layout changes |
+All Phase A performance work is complete. Further gains would require
+changing the pixel data layout (SoA instead of AoS) to allow wider SIMD
+across multiple output pixels simultaneously — a major refactor with
+uncertain payoff given rayon already saturates all cores.
 
 ### Code quality / DX
 
 | ID | Item | Files | Effort | Notes |
 |----|------|-------|--------|-------|
-| ~~B6~~ | ~~Expand integration tests~~ | ~~`tests/basic.rs`~~ | ~~M~~ | Done — cdfd5a4 |
-| B7 | `bench_full_pipeline` | `benches/ops.rs` | S | End-to-end benchmark on a synthetic 640×480 input through the color-PAL-TV preset; provides a single regression number |
+| ~~B6~~ | ~~Expand integration tests~~ | — | Done — cdfd5a4 |
+| ~~B7~~ | ~~`bench_full_pipeline`~~ | — | Done — 7c812e7 (306 ms baseline) |
 
 ### New CLI features
 
 | ID | Item | Files | Effort | Notes |
 |----|------|-------|--------|-------|
-| C1 | `--validate` flag | `main.rs`, `config.rs` | S | Parse config, print derived variables, check overlay file existence, then exit without loading the image.  Useful for iterating on `.cfg` files |
-| C2 | Batch mode | `main.rs` | M | `--batch <cfg> <input_dir/> <output_dir/>` — glob input files, process in parallel with rayon, reuse parsed `Config` |
-| C4 | 16-bit output correctness | `image_buf.rs` | S | `OFORMAT=1` is wired but the 16-bit quantisation path needs a test confirming values use the full 0–65535 range |
+| ~~C1~~ | ~~`--validate` flag~~ | — | Done — a742e94 |
+| ~~C2~~ | ~~Batch mode~~ | — | Done — d691b56 |
+| ~~C4~~ | ~~16-bit output correctness~~ | — | Done — adacbd5 |
 
 ---
 
