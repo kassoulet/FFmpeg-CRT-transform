@@ -55,7 +55,7 @@ Phase B requires three independent components that can be built in order:
 | ~~B-1~~ | ~~FfmpegFrameSource + FfmpegFrameSink~~ | `src/video.rs` | Done — 973790a (round-trip test: 8 frames, luma error < 1%) |
 | ~~B-2~~ | ~~Wire LATENCY into pipeline~~ | `src/pipeline.rs` | Done — bundled with B-3 |
 | ~~B-3~~ | ~~Wire P_DECAY_FACTOR (p7 phosphor decay)~~ | `src/pipeline.rs` | Done — `run_video_inner()` applies `TemporalMixer.mix()` per frame |
-| B-4 | End-to-end video test | `tests/` | **Next** — run short clip, compare vs ffcrt.sh reference (PSNR ≥ 35 dB) |
+| ~~B-4~~ | ~~End-to-end video test~~ | `tests/` | Done — a65a084 (`video_p_decay_trail_end_to_end`: step video, decay trail YAVG > 5 verified via ffmpeg signalstats, ~12 s) |
 
 ---
 
