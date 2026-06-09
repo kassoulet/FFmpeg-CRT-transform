@@ -26,6 +26,66 @@ fn run_preset_test(cfg: &str, input: &str, tag: &str, min_bytes: u64) {
 }
 
 // ---------------------------------------------------------------------------
+// --batch tests (fast: uses fpanel-fast.cfg with PRESCALE_BY=1)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn batch_processes_directory() {
+    let input_dir = std::env::temp_dir().join("crt-batch-test-in");
+    let output_dir = std::env::temp_dir().join("crt-batch-test-out");
+    let _ = std::fs::remove_dir_all(&input_dir);
+    let _ = std::fs::remove_dir_all(&output_dir);
+    std::fs::create_dir_all(&input_dir).unwrap();
+
+    // Copy a small test image into the temp input dir.
+    std::fs::copy("test-suite/08.png", input_dir.join("08.png")).unwrap();
+
+    let out = bin()
+        .arg("test-suite/fpanel-fast.cfg")
+        .arg("--batch")
+        .arg(&input_dir)
+        .arg(&output_dir)
+        .output()
+        .unwrap();
+
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // Output file should exist with the expected name.
+    let expected = output_dir.join("08_fpanel-fast.png");
+    assert!(
+        expected.exists(),
+        "output file not found: {}",
+        expected.display()
+    );
+    assert!(std::fs::metadata(&expected).unwrap().len() > 1000);
+
+    let _ = std::fs::remove_dir_all(&input_dir);
+    let _ = std::fs::remove_dir_all(&output_dir);
+}
+
+#[test]
+fn batch_empty_dir_exits_zero() {
+    let input_dir = std::env::temp_dir().join("crt-batch-test-empty");
+    let _ = std::fs::remove_dir_all(&input_dir);
+    std::fs::create_dir_all(&input_dir).unwrap();
+
+    let out = bin()
+        .arg("test-suite/fpanel-fast.cfg")
+        .arg("--batch")
+        .arg(&input_dir)
+        .arg(std::env::temp_dir().join("crt-batch-test-empty-out"))
+        .output()
+        .unwrap();
+
+    assert!(out.status.success());
+    let _ = std::fs::remove_dir_all(&input_dir);
+}
+
+// ---------------------------------------------------------------------------
 // --validate tests (fast, no image processing)
 // ---------------------------------------------------------------------------
 
