@@ -10,13 +10,15 @@ done
 BINDIR="$(dirname "$0")/.."
 pushd "$BINDIR" > /dev/null || exit 1
 
-FFCRT="$(pwd)/target/release/ffcrt"
-if [ "${CARGO_TARGET_DIR+set}" = set ]; then
-  FFCRT="$CARGO_TARGET_DIR/release/ffcrt"
+# Resolve CARGO_TARGET_DIR from env, .cargo/config.toml, or default.
+if [ -z "$CARGO_TARGET_DIR" ]; then
+  CARGO_TARGET_DIR=$(cargo metadata --no-deps --format-version 1 2>/dev/null \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('target_directory',''))" 2>/dev/null)
 fi
+FFCRT="${CARGO_TARGET_DIR:-$(pwd)/target}/release/crt-transform"
 
 if [ ! -x "$FFCRT" ]; then
-  echo "Building ffcrt (release) ..."
+  echo "Building crt-transform (release) ..."
   cargo build --release || exit 1
 fi
 
