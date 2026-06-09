@@ -42,8 +42,8 @@ Performance is 3–11× faster than the ffcrt.sh reference on a 6-core machine.
 
 | ID | Item | Files | Effort | Notes |
 |----|------|-------|--------|-------|
-| D1 | Gate slow integration tests behind `#[ignore]` | `tests/basic.rs` | S | `cli_runs_color_preset`, `cli_runs_mono_preset`, `cli_runs_amber_preset` each take >60 s (PRESCALE_BY 5–6, OY up to 2160). Mark `#[ignore]`; add fast companion configs (PRESCALE_BY=2, OY=480) that run in <5 s and cover the same code paths. `cargo test` drops from ~12 min to <30 s |
-| D2 | Fast color/mono/amber test configs | `test-suite/` | S | `color-fast.cfg`, `mono-fast.cfg`, `amber-fast.cfg` — same families, PRESCALE_BY=2 OY=480; referenced by the non-ignored `cli_runs_*_fast` tests |
+| ~~D1~~ | ~~Gate slow integration tests~~ | — | Done — 8ba770b (18 min → ~98 s debug / ~15 s release) |
+| ~~D2~~ | ~~Fast color/mono/amber configs~~ | — | Done — 8ba770b |
 
 ### Phase B — Video
 
