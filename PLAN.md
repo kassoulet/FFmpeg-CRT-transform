@@ -1,91 +1,83 @@
 # crt-transform — Development Plan
 
-## Current state (Phase A complete)
+## Current state (Phase A + CLI complete)
 
-Still-image pipeline is complete and passing all tests.  The binary produces
-perceptually correct output for all 16 presets.  Performance is 3–11× faster
-than the ffcrt.sh reference on a 6-core machine.
+Still-image pipeline is complete and all tests pass.  The binary handles
+single images, batch directories, config validation, and stage dumping.
+Performance is 3–11× faster than the ffcrt.sh reference on a 6-core machine.
+74 unit tests · 12 integration tests · pipeline benchmark: **306 ms** (640×480, color CRT preset).
 
 ---
 
 ## Completed items
 
-| ID | Item | Commit |
-|----|------|--------|
-| A1 | Gamma LUT (4096-entry, ~10× speedup) | ee03c47 |
-| A2 | Gaussian kernel caching in `gblur_iso` | 814b9f0 |
-| A3 | Eliminate `step02.clone()` in `step03` | ee03c47 |
-| A4 | `ImgF32::for_each_row_mut` helper | ee03c47 |
-| A5 | Blur edge-loop consolidation + dynamic gather buffer | 1246755 / fc6e54f |
-| B1 | `Config::validate()` with range warnings | 5b4ca50 |
-| B2 | Early overlay-file existence check | ee03c47 |
-| B3 | Progress callback in `run()` | ee03c47 |
-| B4 | Monitor profile unit tests | ee03c47 |
-| B5 | Expanded bench coverage (gamma, blend, vignette) | ee03c47 |
-| SIMD | Investigated manual SSE2/FMA intrinsics — **reverted** | fc6e54f |
+| ID  | Item                                  | Commit   |
+|-----|---------------------------------------|----------|
+| A1  | Gamma LUT (4096-entry, ~10× speedup)  | ee03c47  |
+| A2  | Gaussian kernel caching               | 814b9f0  |
+| A3  | Eliminate step02.clone() in step03    | ee03c47  |
+| A4  | ImgF32::for_each_row_mut helper       | ee03c47  |
+| A5  | Blur edge-loop consolidation + dynamic gather buffer | 1246755 / fc6e54f |
+| B1  | Config::validate() with range warnings | 5b4ca50 |
+| B2  | Early overlay-file existence check    | ee03c47  |
+| B3  | Progress callback in run()            | ee03c47  |
+| B4  | Monitor profile unit tests            | ee03c47  |
+| B5  | Expanded bench coverage               | ee03c47  |
+| B6  | Integration tests — one per preset family | cdfd5a4 |
+| B7  | bench_full_pipeline (306 ms baseline) | 7c812e7  |
+| C1  | --validate flag                       | a742e94  |
+| C2  | --batch mode (parallel, rayon)        | d691b56  |
+| C4  | 16-bit output correctness test        | adacbd5  |
 
-> SIMD note: hand-written 128-bit SSE2 was 40% slower than the scalar loops
-> that LLVM auto-vectorizes to AVX2+FMA (256-bit) via `target-cpu=native`.
-> The scalar `accum_rgba` + `saxpy` structure was kept; the compiler wins.
-
----
-
-## Remaining work
-
-### Performance
-
-All Phase A performance work is complete. Further gains would require
-changing the pixel data layout (SoA instead of AoS) to allow wider SIMD
-across multiple output pixels simultaneously — a major refactor with
-uncertain payoff given rayon already saturates all cores.
-
-### Code quality / DX
-
-| ID | Item | Files | Effort | Notes |
-|----|------|-------|--------|-------|
-| ~~B6~~ | ~~Expand integration tests~~ | — | Done — cdfd5a4 |
-| ~~B7~~ | ~~`bench_full_pipeline`~~ | — | Done — 7c812e7 (306 ms baseline) |
-
-### New CLI features
-
-| ID | Item | Files | Effort | Notes |
-|----|------|-------|--------|-------|
-| ~~C1~~ | ~~`--validate` flag~~ | — | Done — a742e94 |
-| ~~C2~~ | ~~Batch mode~~ | — | Done — d691b56 |
-| ~~C4~~ | ~~16-bit output correctness~~ | — | Done — adacbd5 |
+> **SIMD note:** hand-written 128-bit SSE2 intrinsics were 40% *slower* than
+> the scalar loops LLVM auto-vectorizes to AVX2+FMA (256-bit) via
+> `target-cpu=native`.  Scalar `accum_rgba` + `saxpy` was kept; the compiler
+> wins.  See `fc6e54f`.
 
 ---
 
-## Phase B — Video
+## Next tasks
 
-Video support requires:
+### D — Developer experience
 
-1. **Codec I/O layer** — pipe rawvideo frames through `ffmpeg -f rawvideo` as
-   stdin/stdout; avoids a native H.264 decoder dependency.
+| ID | Item | Files | Effort | Notes |
+|----|------|-------|--------|-------|
+| D1 | Gate slow integration tests behind `#[ignore]` | `tests/basic.rs` | S | `cli_runs_color_preset`, `cli_runs_mono_preset`, `cli_runs_amber_preset` each take >60 s (PRESCALE_BY 5–6, OY up to 2160). Mark `#[ignore]`; add fast companion configs (PRESCALE_BY=2, OY=480) that run in <5 s and cover the same code paths. `cargo test` drops from ~12 min to <30 s |
+| D2 | Fast color/mono/amber test configs | `test-suite/` | S | `color-fast.cfg`, `mono-fast.cfg`, `amber-fast.cfg` — same families, PRESCALE_BY=2 OY=480; referenced by the non-ignored `cli_runs_*_fast` tests |
 
-2. **Frame-pipeline interface** — traits for streaming frames in and out:
-   ```rust
-   pub trait FrameSource: Iterator<Item = Result<ImgF32>> {}
-   pub trait FrameSink { fn write(&mut self, frame: &ImgF32) -> Result<()>; }
-   ```
+### Phase B — Video
 
-3. **Temporal mixer** — holds the previous N frames in a ring buffer to
-   implement `LATENCY` (frame mixing via `tmix`) and `P_DECAY_FACTOR` (p7
-   phosphor decay via `lagfun`).
+Phase B requires three independent components that can be built in order:
 
-4. **Per-frame pipeline** — the existing `step01`–`step03` + `output` stages
-   are already stateless and can be called per frame once the I/O layer is
-   wired up.
+#### B-0 · Video framing interface (no codec I/O)
 
-### Phase B milestones
+Add `src/video.rs` with the types needed for temporal mixing:
 
-| Milestone | Deliverable |
-|-----------|-------------|
-| B-0 | Add `src/video.rs` with `FrameSource`/`FrameSink` trait definitions and `TemporalMixer` struct; unit-test the mixing logic without codec I/O |
-| B-1 | Implement `FfmpegFrameSource` / `FfmpegFrameSink` using `std::process::Command` pipes; validate round-trip on a short clip |
-| B-2 | Wire `LATENCY`/`LATENCY_ALPHA` through `TemporalMixer` in the pipeline |
-| B-3 | Wire `P_DECAY_FACTOR`/`P_DECAY_ALPHA` for the p7 phosphor-decay path |
-| B-4 | End-to-end comparison against `ffcrt.sh` output on test clips |
+```rust
+pub trait FrameSource: Iterator<Item = Result<ImgF32>> {}
+pub trait FrameSink { fn write(&mut self, frame: &ImgF32) -> Result<()>; }
+
+pub struct TemporalMixer {
+    latency: usize,          // LATENCY: ring-buffer of N past frames
+    decay_factor: f32,       // P_DECAY_FACTOR: exponential phosphor trail
+    decay_alpha: f32,        // P_DECAY_ALPHA: blend weight
+    ring: VecDeque<ImgF32>,  // held frames
+}
+impl TemporalMixer {
+    pub fn mix(&mut self, frame: ImgF32) -> ImgF32 { ... }
+}
+```
+
+Unit-test the mixing logic (latency blending, phosphor decay convergence)
+without touching any codec.  This unblocks B-2 and B-3 immediately.
+
+| ID  | Item | Files | Effort | Notes |
+|-----|------|-------|--------|-------|
+| B-0 | FrameSource/FrameSink traits + TemporalMixer | `src/video.rs` | M | Pure Rust, no subprocess. Unit tests for latency ring-buffer and decay convergence. No CLI wiring yet. |
+| B-1 | FfmpegFrameSource + FfmpegFrameSink | `src/video.rs` | M | Spawn `ffmpeg -f rawvideo` as a child process; pipe raw RGBA frames in/out. Validate round-trip on a 10-frame synthetic clip. |
+| B-2 | Wire LATENCY into pipeline | `src/pipeline.rs`, `src/video.rs` | S | Thread `TemporalMixer` through the per-frame pipeline loop; LATENCY frames held in ring buffer. |
+| B-3 | Wire P_DECAY_FACTOR (p7 phosphor decay) | `src/pipeline.rs` | S | Apply exponential decay trail from TemporalMixer on the p7 path. Matches the `lagfun` filter in ffcrt.sh. |
+| B-4 | End-to-end video test | `tests/` | M | Run on a short test clip; compare frame-level output against `ffcrt.sh` reference (PSNR ≥ 35 dB). |
 
 ---
 
