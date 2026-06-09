@@ -183,6 +183,41 @@ mod tests {
     }
 
     #[test]
+    fn save_16bit_uses_full_range() {
+        // A pixel at 50% intensity: 8-bit → 128/255 ≈ 0.502,
+        //                           16-bit → 32768/65535 ≈ 0.500.
+        // Key check: the 16-bit value must exceed 255 (the 8-bit ceiling).
+        let mut img = ImgF32::new(1, 1);
+        img.set(0, 0, [0.5, 0.5, 0.5, 1.0]);
+
+        let dir = std::env::temp_dir();
+        let p8 = dir.join("crt-test-save-8bit.png");
+        let p16 = dir.join("crt-test-save-16bit.png");
+
+        img.save(&p8, 8).unwrap();
+        img.save(&p16, 16).unwrap();
+
+        // 8-bit: (0.5 * 255 + 0.5) as u8 = 128
+        let img8 = image::open(&p8).unwrap().to_rgb8();
+        assert_eq!(img8.get_pixel(0, 0)[0], 128, "8-bit mid-grey should be 128");
+
+        // 16-bit: (0.5 * 65535 + 0.5) as u16 = 32768
+        let img16 = image::open(&p16).unwrap().to_rgb16();
+        let v16 = img16.get_pixel(0, 0)[0];
+        assert!(
+            v16 > 255,
+            "16-bit value {v16} should exceed 8-bit ceiling (255)"
+        );
+        assert!(
+            (v16 as i32 - 32768).abs() < 5,
+            "16-bit mid-grey should be ~32768, got {v16}"
+        );
+
+        let _ = std::fs::remove_file(&p8);
+        let _ = std::fs::remove_file(&p16);
+    }
+
+    #[test]
     fn clone_is_independent() {
         let mut img = ImgF32::new(2, 2);
         img.set(0, 0, [0.5, 0.5, 0.5, 1.0]);
