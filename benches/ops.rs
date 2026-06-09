@@ -6,6 +6,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use crt_transform::image_buf::ImgF32;
 use crt_transform::ops::{blend, blur, gamma, generate, lens, resample, vignette};
+use std::path::Path;
 
 fn img_small() -> ImgF32 {
     ImgF32::filled(640, 480, [0.5, 0.5, 0.5, 1.0])
@@ -122,6 +123,38 @@ fn bench_to_gray(c: &mut Criterion) {
     });
 }
 
+/// End-to-end pipeline through a color CRT preset on a 640×480 input.
+///
+/// Uses `benches/color-fast.cfg` (PRESCALE_BY=2, OY=480) to keep each
+/// iteration under ~2 s while exercising all major branches: shadowmask,
+/// scanlines, bloom, halation, CRT curvature, vignette.
+/// This is the canonical regression number for the full pipeline.
+fn bench_full_pipeline(c: &mut Criterion) {
+    let cfg = Path::new("benches/color-fast.cfg");
+    let input = Path::new("test-suite/08.png");
+    let output = std::env::temp_dir().join("crt-bench-pipeline-out.png");
+
+    // Sanity check: fail loudly at bench startup rather than silently skip.
+    assert!(cfg.exists(), "benches/color-fast.cfg not found");
+    assert!(input.exists(), "test-suite/08.png not found");
+
+    let mut group = c.benchmark_group("pipeline");
+    group.sample_size(20);
+    group.bench_function("color_640x480", |b| {
+        b.iter(|| {
+            crt_transform::run(
+                black_box(cfg),
+                black_box(input),
+                black_box(&output),
+                None,
+                None,
+            )
+            .expect("pipeline run failed");
+        })
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_blur,
@@ -130,6 +163,7 @@ criterion_group!(
     bench_gamma,
     bench_blend,
     bench_vignette,
-    bench_to_gray
+    bench_to_gray,
+    bench_full_pipeline
 );
 criterion_main!(benches);
