@@ -5,6 +5,6 @@ pub mod ops;
 pub mod pipeline;
 pub mod video;
 
-pub use config::Config;
+pub use config::{Config, Derived};
 pub use image_buf::ImgF32;
-pub use pipeline::run;
+pub use pipeline::{run, run_video};

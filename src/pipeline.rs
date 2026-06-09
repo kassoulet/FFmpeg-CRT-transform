@@ -32,11 +32,17 @@ struct Ctx<'p> {
     scanlines_on: bool,
     ovl_alpha: f64,
     dump: Option<PathBuf>,
+    /// When false, `dump()` is a no-op (used to silence per-frame dumps after
+    /// the first frame in video mode).
+    dump_active: std::cell::Cell<bool>,
     progress: Option<&'p dyn Fn(&str)>,
 }
 
 impl Ctx<'_> {
     fn dump(&self, name: &str, img: &ImgF32) {
+        if !self.dump_active.get() {
+            return;
+        }
         if let Some(dir) = &self.dump {
             let _ = std::fs::create_dir_all(dir);
             let p = dir.join(format!("{name}.png"));
@@ -94,6 +100,7 @@ fn make_ctx<'p>(
         scanlines_on,
         ovl_alpha,
         dump,
+        dump_active: std::cell::Cell::new(true),
         progress,
     })
 }
@@ -229,7 +236,12 @@ fn run_video_inner(
     let ctx = make_ctx(cfg, info.w as i64, info.h as i64, dump, progress)?;
 
     let latency = ctx.cfg.i64_or("LATENCY", 0).max(0) as usize;
-    let latency_alpha = ctx.cfg.f64_or("LATENCY_ALPHA", 0.0) as f32;
+    // ffcrt.sh forces LATENCY_ALPHA=1 for p7 (the tint curves encode the blend weight).
+    let latency_alpha = if ctx.mon.is_p7 {
+        1.0f32
+    } else {
+        ctx.cfg.f64_or("LATENCY_ALPHA", 0.0) as f32
+    };
     let decay_factor = ctx.cfg.f64_or("P_DECAY_FACTOR", 0.0) as f32;
     let decay_alpha = ctx.cfg.f64_or("P_DECAY_ALPHA", 0.0) as f32;
     let mut mixer = TemporalMixer::new(latency, latency_alpha, decay_factor, decay_alpha);
@@ -250,6 +262,9 @@ fn run_video_inner(
             generate::negate(&mut frame);
         }
         let processed = process_one_frame(&ctx, frame, &layers)?;
+        // After the first frame, suppress per-frame stage dumps to avoid
+        // overwriting the frame-0 dump files and unnecessary I/O.
+        ctx.dump_active.set(false);
         let mixed = mixer.mix(processed);
         sink.write(&mixed)?;
     }

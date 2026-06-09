@@ -155,7 +155,6 @@ mod tests {
 
     #[test]
     fn derived_compute_simple() {
-        // Simulate a minimal config
         let mut raw = HashMap::new();
         raw.insert("PRESCALE_BY".into(), "2".into());
         raw.insert("PX_ASPECT".into(), "1/1".into());
@@ -167,6 +166,32 @@ mod tests {
         assert_eq!(d.px, 640);
         assert_eq!(d.py, 400);
         assert_eq!(d.oy, 1080);
+    }
+
+    #[test]
+    fn config_to_map_contains_all_keys() {
+        let mut raw = HashMap::new();
+        raw.insert("OY".into(), "720".into());
+        raw.insert("PRESCALE_BY".into(), "3".into());
+        let cfg = Config { raw };
+        let map = cfg.to_map();
+        assert_eq!(map.get("OY").map(String::as_str), Some("720"));
+        assert_eq!(map.get("PRESCALE_BY").map(String::as_str), Some("3"));
+        assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn derived_report_contains_key_fields() {
+        let mut raw = HashMap::new();
+        raw.insert("PRESCALE_BY".into(), "2".into());
+        raw.insert("OY".into(), "480".into());
+        raw.insert("OASPECT".into(), "4/3".into());
+        let cfg = Config { raw };
+        let d = Derived::compute(&cfg, 320, 240).unwrap();
+        let r = d.report();
+        assert!(r.contains("320×240"), "missing input dims: {r}");
+        assert!(r.contains("640×480"), "missing canvas dims: {r}");
+        assert!(r.contains("output_bpc"), "missing bpc line: {r}");
     }
 }
 
@@ -257,6 +282,16 @@ impl Config {
         pairs
     }
 
+    /// Return all key-value pairs as an owned `BTreeMap` (C3 introspection API).
+    /// Keys are in alphabetical order; values are raw strings as they appear
+    /// in the `.cfg` file.
+    pub fn to_map(&self) -> std::collections::BTreeMap<String, String> {
+        self.raw
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+
     /// Validate config values and return a list of human-readable warnings.
     /// Warnings are non-fatal: the pipeline still runs, but results may be
     /// unexpected. Returns an empty vec when everything looks sane.
@@ -338,7 +373,7 @@ pub fn parse_frac(s: &str) -> Result<Frac> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ScanFactor {
     Single,
     Double,
@@ -458,5 +493,45 @@ impl Derived {
             flat_panel,
             output_bpc,
         })
+    }
+
+    /// Human-readable summary of all derived variables (C3 introspection API).
+    ///
+    /// Intended for embedding consumers that want to log or display the
+    /// effective settings after integer-truncating arithmetic.
+    pub fn report(&self) -> String {
+        format!(
+            "input:       {}×{}\n\
+             prescale:    {} (canvas {}×{})\n\
+             px_aspect:   {}/{}\n\
+             sxint:       {}\n\
+             output:      {}×{} (margin {})\n\
+             oaspect:     {}/{}\n\
+             vsigma:      {:.4}\n\
+             scan_factor: {:?}  sl_count={}\n\
+             crt_curve:   {:.4}  bezel_curve={:.4}\n\
+             flat_panel:  {}\n\
+             output_bpc:  {}",
+            self.ix,
+            self.iy,
+            self.prescale,
+            self.px,
+            self.py,
+            self.px_aspect.num,
+            self.px_aspect.den,
+            self.sxint,
+            self.ox,
+            self.oy,
+            self.omargin,
+            self.oaspect.num,
+            self.oaspect.den,
+            self.vsigma,
+            self.scan_factor,
+            self.sl_count,
+            self.crt_curvature,
+            self.bezel_curvature,
+            self.flat_panel,
+            self.output_bpc,
+        )
     }
 }
