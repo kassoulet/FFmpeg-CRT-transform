@@ -1,7 +1,8 @@
 //! Video framing interface and temporal mixing.
 //!
-//! Phase B skeleton — codec I/O (B-1) is not yet implemented.
-//! [`TemporalMixer`] implements the two temporal effects from ffcrt.sh:
+//! [`FfmpegFrameSource`] and [`FfmpegFrameSink`] pipe raw RGBA frames through
+//! an ffmpeg subprocess (B-1).  [`TemporalMixer`] implements LATENCY (tmix)
+//! and P_DECAY (lagfun) on top of those frames.
 //!
 //! - **LATENCY / tmix**: temporal average of the last N frames, blended back
 //!   into the current frame at `LATENCY_ALPHA`.
@@ -17,8 +18,11 @@
 //! compose additively (latency is applied first, then decay).
 
 use crate::image_buf::ImgF32;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::collections::VecDeque;
+use std::io::{BufReader, Read, Write};
+use std::path::Path;
+use std::process::{Child, ChildStdin, Command, Stdio};
 
 // ---------------------------------------------------------------------------
 // Traits (B-1 will provide concrete implementations)
@@ -30,6 +34,276 @@ pub trait FrameSource: Iterator<Item = Result<ImgF32>> {}
 /// Accepts processed frames for encoding or writing.
 pub trait FrameSink {
     fn write(&mut self, frame: &ImgF32) -> Result<()>;
+}
+
+// ---------------------------------------------------------------------------
+// Video metadata
+// ---------------------------------------------------------------------------
+
+/// Basic metadata returned by [`probe_video`].
+#[derive(Debug, Clone)]
+pub struct VideoInfo {
+    pub w: usize,
+    pub h: usize,
+    /// Numerator of the frame-rate rational.
+    pub fps_num: u32,
+    /// Denominator of the frame-rate rational.
+    pub fps_den: u32,
+}
+
+impl VideoInfo {
+    /// Frame rate as an `f64`.
+    pub fn fps(&self) -> f64 {
+        self.fps_num as f64 / self.fps_den as f64
+    }
+}
+
+/// Query width, height, and frame-rate from a video file using `ffprobe`.
+pub fn probe_video(path: &Path) -> Result<VideoInfo> {
+    let out = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,r_frame_rate",
+            "-of",
+            "csv=p=0",
+            path.to_str().context("non-UTF-8 path")?,
+        ])
+        .output()
+        .context("ffprobe not found — is ffmpeg installed?")?;
+
+    anyhow::ensure!(
+        out.status.success(),
+        "ffprobe failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let text = String::from_utf8(out.stdout).context("ffprobe output not UTF-8")?;
+    let text = text.trim();
+    // Expected format: "WIDTH,HEIGHT,NUM/DEN"
+    let mut parts = text.splitn(3, ',');
+    let w: usize = parts.next().context("missing width")?.parse()?;
+    let h: usize = parts.next().context("missing height")?.parse()?;
+    let fps_str = parts.next().context("missing frame rate")?;
+    let mut fps_parts = fps_str.splitn(2, '/');
+    let fps_num: u32 = fps_parts.next().context("missing fps numerator")?.parse()?;
+    let fps_den: u32 = fps_parts.next().unwrap_or("1").trim().parse().unwrap_or(1);
+
+    Ok(VideoInfo {
+        w,
+        h,
+        fps_num,
+        fps_den,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// FfmpegFrameSource
+// ---------------------------------------------------------------------------
+
+/// Decodes a video file frame-by-frame, yielding raw RGBA [`ImgF32`] frames.
+///
+/// Spawns `ffmpeg -i <path> -f rawvideo -pix_fmt rgba -` and reads frames
+/// from stdout.  Call [`probe_video`] first to inspect metadata without
+/// opening the pipe.
+pub struct FfmpegFrameSource {
+    child: Child,
+    reader: BufReader<std::process::ChildStdout>,
+    w: usize,
+    h: usize,
+    frame_bytes: Vec<u8>,
+    done: bool,
+}
+
+impl FfmpegFrameSource {
+    /// Open `path` for sequential frame decoding.
+    pub fn open(path: &Path) -> Result<Self> {
+        let info = probe_video(path)?;
+        Self::open_with_info(path, &info)
+    }
+
+    /// Open with pre-probed [`VideoInfo`] (avoids a second ffprobe call).
+    pub fn open_with_info(path: &Path, info: &VideoInfo) -> Result<Self> {
+        let mut child = Command::new("ffmpeg")
+            .args([
+                "-i",
+                path.to_str().context("non-UTF-8 path")?,
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgba",
+                "pipe:1",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .context("ffmpeg not found — is ffmpeg installed?")?;
+
+        let stdout = child.stdout.take().context("no stdout from ffmpeg")?;
+        Ok(Self {
+            child,
+            reader: BufReader::new(stdout),
+            w: info.w,
+            h: info.h,
+            frame_bytes: vec![0u8; info.w * info.h * 4],
+            done: false,
+        })
+    }
+}
+
+impl Iterator for FfmpegFrameSource {
+    type Item = Result<ImgF32>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+        match self.reader.read_exact(&mut self.frame_bytes) {
+            Ok(()) => {
+                let mut img = ImgF32::new(self.w, self.h);
+                for (dst, src) in img
+                    .data
+                    .chunks_exact_mut(4)
+                    .zip(self.frame_bytes.chunks_exact(4))
+                {
+                    dst[0] = src[0] as f32 / 255.0;
+                    dst[1] = src[1] as f32 / 255.0;
+                    dst[2] = src[2] as f32 / 255.0;
+                    dst[3] = src[3] as f32 / 255.0;
+                }
+                Some(Ok(img))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                self.done = true;
+                None
+            }
+            Err(e) => {
+                self.done = true;
+                Some(Err(e.into()))
+            }
+        }
+    }
+}
+
+impl FrameSource for FfmpegFrameSource {}
+
+impl Drop for FfmpegFrameSource {
+    fn drop(&mut self) {
+        let _ = self.child.wait();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FfmpegFrameSink
+// ---------------------------------------------------------------------------
+
+/// Encodes RGBA [`ImgF32`] frames into a video file via ffmpeg.
+///
+/// Spawns `ffmpeg -f rawvideo -pix_fmt rgba -video_size WxH -framerate R -i
+/// pipe:0 <output>` and writes frames to stdin.  Call [`finish`] after the
+/// last frame to flush and wait for ffmpeg to exit cleanly.
+///
+/// [`finish`]: FfmpegFrameSink::finish
+pub struct FfmpegFrameSink {
+    child: Child,
+    stdin: Option<ChildStdin>,
+    w: usize,
+    h: usize,
+    row_buf: Vec<u8>,
+}
+
+impl FfmpegFrameSink {
+    /// Create `path` as a video file.  Frame dimensions and frame rate must
+    /// match every frame passed to [`write`].
+    ///
+    /// [`write`]: FrameSink::write
+    pub fn create(path: &Path, w: usize, h: usize, fps_num: u32, fps_den: u32) -> Result<Self> {
+        let fps_str = if fps_den == 1 {
+            fps_num.to_string()
+        } else {
+            format!("{fps_num}/{fps_den}")
+        };
+        let size_str = format!("{w}x{h}");
+
+        let mut child = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgba",
+                "-video_size",
+                &size_str,
+                "-framerate",
+                &fps_str,
+                "-i",
+                "pipe:0",
+                path.to_str().context("non-UTF-8 path")?,
+            ])
+            .stdin(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .context("ffmpeg not found — is ffmpeg installed?")?;
+
+        let stdin = child.stdin.take().context("no stdin for ffmpeg")?;
+        Ok(Self {
+            child,
+            stdin: Some(stdin),
+            w,
+            h,
+            row_buf: vec![0u8; w * h * 4],
+        })
+    }
+
+    /// Flush stdin, wait for ffmpeg to exit, and return an error if it failed.
+    /// Must be called after the last [`write`] to ensure the file is finalised.
+    ///
+    /// [`write`]: FrameSink::write
+    pub fn finish(mut self) -> Result<()> {
+        // Drop stdin so ffmpeg sees EOF on its input pipe, then wait.
+        self.stdin.take();
+        let status = self.child.wait().context("waiting for ffmpeg")?;
+        anyhow::ensure!(status.success(), "ffmpeg exited with {status}");
+        Ok(())
+    }
+}
+
+impl FrameSink for FfmpegFrameSink {
+    fn write(&mut self, frame: &ImgF32) -> Result<()> {
+        anyhow::ensure!(
+            frame.w == self.w && frame.h == self.h,
+            "frame size {}x{} != expected {}x{}",
+            frame.w,
+            frame.h,
+            self.w,
+            self.h
+        );
+        for (dst, src) in self
+            .row_buf
+            .chunks_exact_mut(4)
+            .zip(frame.data.chunks_exact(4))
+        {
+            dst[0] = (src[0].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+            dst[1] = (src[1].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+            dst[2] = (src[2].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+            dst[3] = (src[3].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+        }
+        if let Some(ref mut stdin) = self.stdin {
+            stdin
+                .write_all(&self.row_buf)
+                .context("writing frame to ffmpeg")?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for FfmpegFrameSink {
+    fn drop(&mut self) {
+        let _ = self.child.wait();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -335,5 +609,56 @@ mod tests {
                 "frame {i}: luma {luma} out of range"
             );
         }
+    }
+
+    // --- codec round-trip ---
+
+    #[test]
+    fn ffmpeg_roundtrip_preserves_frames() {
+        // Write 8 synthetic frames to a .mkv via FfmpegFrameSink, read them
+        // back with FfmpegFrameSource, and verify per-channel mean is within
+        // the 8-bit quantisation error (≤ 0.004 ≈ 1/255).
+        let tmp_path = std::env::temp_dir().join("crt-video-roundtrip-test.mkv");
+        let _ = std::fs::remove_file(&tmp_path);
+
+        let w = 8;
+        let h = 8;
+        let n_frames = 8;
+        let fps_num = 25;
+        let fps_den = 1;
+
+        // Build test frames with distinct luma values.
+        let frames: Vec<ImgF32> = (0..n_frames)
+            .map(|i| gray_frame(w, h, i as f32 / (n_frames - 1) as f32))
+            .collect();
+
+        // Write.
+        {
+            let mut sink = crate::video::FfmpegFrameSink::create(&tmp_path, w, h, fps_num, fps_den)
+                .expect("create sink");
+            for f in &frames {
+                sink.write(f).expect("write frame");
+            }
+            sink.finish().expect("finish sink");
+        }
+
+        assert!(tmp_path.exists(), "output video not created");
+
+        // Read back.
+        let source = crate::video::FfmpegFrameSource::open(&tmp_path).expect("open source");
+        let decoded: Vec<ImgF32> = source.map(|r| r.expect("decode frame")).collect();
+
+        assert_eq!(decoded.len(), n_frames, "frame count mismatch");
+
+        for (i, (orig, dec)) in frames.iter().zip(decoded.iter()).enumerate() {
+            let orig_luma = mean_luma(orig);
+            let dec_luma = mean_luma(dec);
+            assert!(
+                (orig_luma - dec_luma).abs() < 0.01,
+                "frame {i}: orig={orig_luma:.4} decoded={dec_luma:.4}"
+            );
+        }
+
+        let _ = std::fs::remove_file(&tmp_path);
     }
 }
