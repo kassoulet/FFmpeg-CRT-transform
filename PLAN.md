@@ -49,35 +49,13 @@ Performance is 3–11× faster than the ffcrt.sh reference on a 6-core machine.
 
 Phase B requires three independent components that can be built in order:
 
-#### B-0 · Video framing interface (no codec I/O)
-
-Add `src/video.rs` with the types needed for temporal mixing:
-
-```rust
-pub trait FrameSource: Iterator<Item = Result<ImgF32>> {}
-pub trait FrameSink { fn write(&mut self, frame: &ImgF32) -> Result<()>; }
-
-pub struct TemporalMixer {
-    latency: usize,          // LATENCY: ring-buffer of N past frames
-    decay_factor: f32,       // P_DECAY_FACTOR: exponential phosphor trail
-    decay_alpha: f32,        // P_DECAY_ALPHA: blend weight
-    ring: VecDeque<ImgF32>,  // held frames
-}
-impl TemporalMixer {
-    pub fn mix(&mut self, frame: ImgF32) -> ImgF32 { ... }
-}
-```
-
-Unit-test the mixing logic (latency blending, phosphor decay convergence)
-without touching any codec.  This unblocks B-2 and B-3 immediately.
-
-| ID  | Item | Files | Effort | Notes |
-|-----|------|-------|--------|-------|
-| B-0 | FrameSource/FrameSink traits + TemporalMixer | `src/video.rs` | M | Pure Rust, no subprocess. Unit tests for latency ring-buffer and decay convergence. No CLI wiring yet. |
-| B-1 | FfmpegFrameSource + FfmpegFrameSink | `src/video.rs` | M | Spawn `ffmpeg -f rawvideo` as a child process; pipe raw RGBA frames in/out. Validate round-trip on a 10-frame synthetic clip. |
-| B-2 | Wire LATENCY into pipeline | `src/pipeline.rs`, `src/video.rs` | S | Thread `TemporalMixer` through the per-frame pipeline loop; LATENCY frames held in ring buffer. |
-| B-3 | Wire P_DECAY_FACTOR (p7 phosphor decay) | `src/pipeline.rs` | S | Apply exponential decay trail from TemporalMixer on the p7 path. Matches the `lagfun` filter in ffcrt.sh. |
-| B-4 | End-to-end video test | `tests/` | M | Run on a short test clip; compare frame-level output against `ffcrt.sh` reference (PSNR ≥ 35 dB). |
+| ID  | Item | Files | Status |
+|-----|------|-------|--------|
+| ~~B-0~~ | ~~FrameSource/FrameSink traits + TemporalMixer~~ | `src/video.rs` | Done — aaaf068 |
+| ~~B-1~~ | ~~FfmpegFrameSource + FfmpegFrameSink~~ | `src/video.rs` | Done — 973790a (round-trip test: 8 frames, luma error < 1%) |
+| ~~B-2~~ | ~~Wire LATENCY into pipeline~~ | `src/pipeline.rs` | Done — bundled with B-3 |
+| ~~B-3~~ | ~~Wire P_DECAY_FACTOR (p7 phosphor decay)~~ | `src/pipeline.rs` | Done — `run_video_inner()` applies `TemporalMixer.mix()` per frame |
+| B-4 | End-to-end video test | `tests/` | **Next** — run short clip, compare vs ffcrt.sh reference (PSNR ≥ 35 dB) |
 
 ---
 

@@ -147,16 +147,53 @@ fn cli_rejects_missing_file() {
     assert!(stderr.contains("not found"));
 }
 
+/// Video pipeline — create a tiny 5-frame synthetic clip, process it, verify output exists.
 #[test]
-fn cli_rejects_video_input() {
+fn cli_processes_video_input() {
+    // Create a tiny 5-frame 32×32 colour-bar clip as input.
+    let input = std::env::temp_dir().join("crt-video-test-in.mp4");
+    let output = std::env::temp_dir().join("crt-video-test-out.mp4");
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&output);
+
+    let make = std::process::Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=blue:size=32x32:rate=10",
+            "-frames:v",
+            "5",
+            input.to_str().unwrap(),
+        ])
+        .output()
+        .expect("ffmpeg not available");
+    if !make.status.success() {
+        eprintln!("ffmpeg failed to create test clip — skipping");
+        return;
+    }
+
     let out = bin()
-        .arg("test-suite/01cfg.cfg")
-        .arg("test-suite/01.mp4")
+        .arg("test-suite/video-fast.cfg")
+        .arg(&input)
+        .arg(&output)
         .output()
         .unwrap();
-    assert!(!out.status.success());
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("Phase B"));
+
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(output.exists(), "output video not created");
+    assert!(
+        std::fs::metadata(&output).unwrap().len() > 1000,
+        "output video suspiciously small"
+    );
+
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&output);
 }
 
 // ---------------------------------------------------------------------------

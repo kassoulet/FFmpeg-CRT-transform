@@ -1,4 +1,4 @@
-//! Still-image pipeline orchestration.
+//! Still-image and video pipeline orchestration.
 //!
 //! Each function below reproduces one `::+++` section of `ffcrt.sh`, in the same
 //! order, but passes in-memory `ImgF32` values between stages instead of writing
@@ -6,8 +6,9 @@
 //! (The plan's `stages/*.rs` tree is collapsed into these functions here — see
 //! CLAUDE.md — to keep the data flow in one place.)
 //!
-//! Video (Phase B) and the temporal effects are not implemented yet; `run` bails
-//! with a clear message for video inputs.
+//! [`run`] handles still images. [`run_video`] handles video files via
+//! [`crate::video::FfmpegFrameSource`] / [`crate::video::FfmpegFrameSink`] with
+//! optional LATENCY (tmix) and P_DECAY (lagfun) temporal effects.
 
 use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
@@ -51,6 +52,112 @@ impl Ctx<'_> {
     }
 }
 
+/// Pre-built static layers shared across all frames of a run.
+struct Layers {
+    bezel: ImgF32,
+    scanlines: Option<ImgF32>,
+    shadowmask: ImgF32,
+    grid: Option<ImgF32>,
+}
+
+/// Build context from config + first-frame dimensions.
+fn make_ctx<'p>(
+    cfg: Config,
+    ix: i64,
+    iy: i64,
+    dump: Option<PathBuf>,
+    progress: Option<&'p dyn Fn(&str)>,
+) -> Result<Ctx<'p>> {
+    let d = Derived::compute(&cfg, ix, iy)?;
+    let lcd_grain = cfg.i64_or("LCD_GRAIN", 0);
+    let mon = Monitor::resolve(&cfg.str_or("MONITOR_COLOR", "rgb"), lcd_grain);
+    let scanlines_on = cfg.yes("SCANLINES_ON") && !d.flat_panel;
+    let ovl_alpha = if d.flat_panel || !mon.is_color {
+        0.0
+    } else {
+        cfg.f64_or("OVL_ALPHA", 0.0)
+    };
+    if ovl_alpha > 0.0 {
+        let ovl_type = cfg.str_or("OVL_TYPE", "triad");
+        let mask_path = PathBuf::from(format!("_{ovl_type}.png"));
+        if !mask_path.exists() {
+            bail!(
+                "Shadow mask overlay '_{ovl_type}.png' not found in the working directory. \
+                 Place the overlay file next to the input or set OVL_ALPHA=0 to disable it."
+            );
+        }
+    }
+    Ok(Ctx {
+        cfg,
+        d,
+        mon,
+        scanlines_on,
+        ovl_alpha,
+        dump,
+        progress,
+    })
+}
+
+/// Build the four static layers (bezel, scanlines, shadowmask, grid).
+fn build_layers(ctx: &Ctx) -> Result<Layers> {
+    ctx.progress("bezel");
+    let bezel = build_bezel(ctx);
+    ctx.dump("bezel", &bezel);
+
+    let scanlines = if ctx.scanlines_on {
+        ctx.progress("scanlines");
+        let s = build_scanlines(ctx);
+        ctx.dump("scanlines", &s);
+        Some(s)
+    } else {
+        None
+    };
+
+    ctx.progress("shadowmask");
+    let shadowmask = build_shadowmask(ctx)?;
+    ctx.dump("shadowmask", &shadowmask);
+
+    let grid = if ctx.d.flat_panel {
+        ctx.progress("grid");
+        let g = build_grid(ctx);
+        ctx.dump("grid", &g);
+        Some(g)
+    } else {
+        None
+    };
+
+    Ok(Layers {
+        bezel,
+        scanlines,
+        shadowmask,
+        grid,
+    })
+}
+
+/// Process one frame through steps 01–03 + output (the CRT effect chain).
+fn process_one_frame(ctx: &Ctx, img: ImgF32, layers: &Layers) -> Result<ImgF32> {
+    ctx.progress("step01");
+    let s01 = step01(ctx, &img, layers.grid.as_ref());
+    ctx.dump("step01", &s01);
+
+    ctx.progress("step02");
+    let s02 = step02(ctx, s01);
+    ctx.dump("step02", &s02);
+
+    ctx.progress("step03");
+    let s03 = step03(
+        ctx,
+        s02,
+        layers.scanlines.as_ref(),
+        &layers.shadowmask,
+        &layers.bezel,
+    );
+    ctx.dump("step03", &s03);
+
+    ctx.progress("output");
+    output(ctx, s03)
+}
+
 /// Run the full still-image pipeline.
 ///
 /// `progress` is an optional callback called with a short stage name before
@@ -68,106 +175,86 @@ pub fn run(
         eprintln!("crt-transform: warning: {warning}");
     }
 
-    // --- input probe -----------------------------------------------------
     let ext = input_path
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    let is_video = matches!(ext.as_str(), "mp4" | "mkv" | "avi" | "mov" | "webm" | "m4v");
-    if is_video {
-        bail!(
-            "Video input ('.{ext}') is Phase B and not implemented yet — the native \
-             still-image pipeline is complete. See rust-claude.md / CLAUDE.md."
-        );
+    if matches!(ext.as_str(), "mp4" | "mkv" | "avi" | "mov" | "webm" | "m4v") {
+        return run_video_inner(cfg, input_path, output_path, dump, progress);
     }
 
     let mut img = ImgF32::load(input_path)?;
-    let ix = img.w as i64;
-    let iy = img.h as i64;
+    let ctx = make_ctx(cfg, img.w as i64, img.h as i64, dump, progress)?;
 
-    let d = Derived::compute(&cfg, ix, iy)?;
-    let lcd_grain = cfg.i64_or("LCD_GRAIN", 0);
-    let mon = Monitor::resolve(&cfg.str_or("MONITOR_COLOR", "rgb"), lcd_grain);
-
-    // FLAT_PANEL / monochrome overrides on scanlines + overlay.
-    let scanlines_on = cfg.yes("SCANLINES_ON") && !d.flat_panel;
-    let ovl_alpha = if d.flat_panel || !mon.is_color {
-        0.0
-    } else {
-        cfg.f64_or("OVL_ALPHA", 0.0)
-    };
-
-    // Early check: overlay file must exist before we start the pipeline.
-    if ovl_alpha > 0.0 {
-        let ovl_type = cfg.str_or("OVL_TYPE", "triad");
-        let mask_path = std::path::PathBuf::from(format!("_{ovl_type}.png"));
-        if !mask_path.exists() {
-            bail!(
-                "Shadow mask overlay '_{ovl_type}.png' not found in the working directory. \
-                 Place the overlay file next to the input or set OVL_ALPHA=0 to disable it."
-            );
-        }
-    }
-
-    let ctx = Ctx {
-        cfg,
-        d,
-        mon,
-        scanlines_on,
-        ovl_alpha,
-        dump,
-        progress,
-    };
-
-    // INVERT_INPUT (negate). Temporal pre-process is video-only and skipped.
     if ctx.cfg.yes("INVERT_INPUT") {
         generate::negate(&mut img);
     }
 
-    // --- build the static layers ----------------------------------------
-    ctx.progress("bezel");
-    let bezel = build_bezel(&ctx);
-    ctx.dump("bezel", &bezel);
-
-    let scanlines = if ctx.scanlines_on {
-        ctx.progress("scanlines");
-        let s = build_scanlines(&ctx);
-        ctx.dump("scanlines", &s);
-        Some(s)
-    } else {
-        None
-    };
-
-    ctx.progress("shadowmask");
-    let shadowmask = build_shadowmask(&ctx)?;
-    ctx.dump("shadowmask", &shadowmask);
-
-    let grid = if ctx.d.flat_panel {
-        ctx.progress("grid");
-        let g = build_grid(&ctx);
-        ctx.dump("grid", &g);
-        Some(g)
-    } else {
-        None
-    };
-
-    // --- the per-image processing chain ---------------------------------
-    ctx.progress("step01");
-    let step01 = step01(&ctx, &img, grid.as_ref());
-    ctx.dump("step01", &step01);
-
-    ctx.progress("step02");
-    let step02 = step02(&ctx, step01);
-    ctx.dump("step02", &step02);
-
-    ctx.progress("step03");
-    let step03 = step03(&ctx, step02, scanlines.as_ref(), &shadowmask, &bezel);
-    ctx.dump("step03", &step03);
-
-    ctx.progress("output");
-    let out = output(&ctx, step03)?;
+    let layers = build_layers(&ctx)?;
+    let out = process_one_frame(&ctx, img, &layers)?;
     out.save(output_path, ctx.d.output_bpc)?;
+    Ok(())
+}
+
+/// Run the video pipeline: decode → temporal mix → CRT per-frame → encode.
+///
+/// LATENCY (tmix) and P_DECAY (lagfun) temporal effects are applied to the
+/// processed output of each frame before writing, matching the ffcrt.sh
+/// filter graph order.
+pub fn run_video(
+    cfg_path: &Path,
+    input_path: &Path,
+    output_path: &Path,
+    dump: Option<PathBuf>,
+    progress: Option<&dyn Fn(&str)>,
+) -> Result<()> {
+    let cfg = Config::load(cfg_path)?;
+    for warning in cfg.validate() {
+        eprintln!("crt-transform: warning: {warning}");
+    }
+    run_video_inner(cfg, input_path, output_path, dump, progress)
+}
+
+fn run_video_inner(
+    cfg: Config,
+    input_path: &Path,
+    output_path: &Path,
+    dump: Option<PathBuf>,
+    progress: Option<&dyn Fn(&str)>,
+) -> Result<()> {
+    use crate::video::{FfmpegFrameSink, FfmpegFrameSource, FrameSink, TemporalMixer};
+
+    let info = crate::video::probe_video(input_path)?;
+    let ctx = make_ctx(cfg, info.w as i64, info.h as i64, dump, progress)?;
+
+    let latency = ctx.cfg.i64_or("LATENCY", 0).max(0) as usize;
+    let latency_alpha = ctx.cfg.f64_or("LATENCY_ALPHA", 0.0) as f32;
+    let decay_factor = ctx.cfg.f64_or("P_DECAY_FACTOR", 0.0) as f32;
+    let decay_alpha = ctx.cfg.f64_or("P_DECAY_ALPHA", 0.0) as f32;
+    let mut mixer = TemporalMixer::new(latency, latency_alpha, decay_factor, decay_alpha);
+
+    let layers = build_layers(&ctx)?;
+
+    // Output dimensions come from the config (OY / OASPECT), not the input size.
+    let out_w = ctx.d.ox as usize;
+    let out_h = ctx.d.oy as usize;
+
+    let invert = ctx.cfg.yes("INVERT_INPUT");
+    let source = FfmpegFrameSource::open(input_path)?;
+    let mut sink = FfmpegFrameSink::create(output_path, out_w, out_h, info.fps_num, info.fps_den)?;
+
+    for frame_result in source {
+        let mut frame = frame_result?;
+        if invert {
+            generate::negate(&mut frame);
+        }
+        let processed = process_one_frame(&ctx, frame, &layers)?;
+        let mixed = mixer.mix(processed);
+        sink.write(&mixed)?;
+    }
+
+    sink.finish()?;
     Ok(())
 }
 
