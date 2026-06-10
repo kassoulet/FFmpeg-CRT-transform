@@ -1,14 +1,11 @@
 #!/bin/bash
 TESTRUNSTART=$(date +%T)
 
-rm -f ./*OLD.*
-
-for a in *out.*; do
-  [ -f "$a" ] && mv "$a" "${a%.*}-OLD.${a##*.}"
-done
-
 BINDIR="$(dirname "$0")/.."
 pushd "$BINDIR" > /dev/null || exit 1
+
+OUTDIR="test-suite/output"
+mkdir -p "$OUTDIR"
 
 # Resolve CARGO_TARGET_DIR from env, .cargo/config.toml, or default.
 if [ -z "$CARGO_TARGET_DIR" ]; then
@@ -22,8 +19,12 @@ if [ ! -x "$FFCRT" ]; then
   cargo build --release || exit 1
 fi
 
-echo "Running Rust ffcrt on still-image test cases ..."
+echo "Running Rust crt-transform on test cases ..."
+echo "Output directory: $OUTDIR"
 echo ""
+
+PASS=0
+FAIL=0
 
 for b in test-suite/??.*; do
   [ -f "$b" ] || continue
@@ -31,18 +32,29 @@ for b in test-suite/??.*; do
   name="${base%.*}"
   ext="${base##*.}"
 
+  cfg="test-suite/${name}cfg.cfg"
+  [ -f "$cfg" ] || { echo "  $base  skipped (no ${name}cfg.cfg)"; continue; }
+
   case "${ext,,}" in
-    png|jpg|jpeg|tif|tiff|bmp)
-      echo "  $base  (${name}cfg.cfg)"
-      "$FFCRT" "test-suite/${name}cfg.cfg" "$b" "test-suite/${name}-out.${ext}"
+    png|jpg|jpeg|tif|tiff|bmp|mp4|mkv|avi|mov|webm|m4v)
+      out="$OUTDIR/${name}-out.${ext}"
+      printf "  %-12s" "$base"
+      if "$FFCRT" "$cfg" "$b" "$out"; then
+        echo "  ok  ->  $out"
+        PASS=$((PASS + 1))
+      else
+        echo "  FAIL"
+        FAIL=$((FAIL + 1))
+      fi
       ;;
     *)
-      echo "  $base  skipped (not a still image)"
+      echo "  $base  skipped (unsupported format)"
       ;;
   esac
 done
 
 echo ""
-echo "TOTAL FOR ALL TESTS -"
-echo "Started:     $TESTRUNSTART"
-echo "Finished:    $(date +%T)"
+echo "TOTAL: $PASS passed, $FAIL failed"
+echo "Started:  $TESTRUNSTART"
+echo "Finished: $(date +%T)"
+[ "$FAIL" -eq 0 ]
