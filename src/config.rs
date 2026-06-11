@@ -271,6 +271,11 @@ impl Config {
         }
     }
 
+    /// Override or add a single config key (used by `--set` CLI flag).
+    pub fn set(&mut self, key: &str, value: &str) {
+        self.raw.insert(key.to_string(), value.to_string());
+    }
+
     /// Return all key-value pairs, sorted by key.  Used by `--validate`.
     pub fn entries(&self) -> Vec<(&str, &str)> {
         let mut pairs: Vec<(&str, &str)> = self
@@ -351,6 +356,46 @@ impl Config {
                     "OFILTER={s:?} is not recognised; will fall back to bicubic. \
                      Known values: {}",
                     KNOWN_FILTERS.join(", ")
+                ));
+            }
+        }
+
+        // VIDEO_CRF must be in [0, 51].
+        if let Some(s) = self.opt("VIDEO_CRF") {
+            if let Ok(v) = s.parse::<i64>() {
+                if !(0..=51).contains(&v) {
+                    w.push(format!("VIDEO_CRF={v} is outside [0, 51]; will be clamped"));
+                }
+            }
+        }
+
+        // MAX_DURATION, if present, must be positive.
+        if let Some(s) = self.opt("MAX_DURATION") {
+            if let Ok(v) = s.parse::<f64>() {
+                if v <= 0.0 {
+                    w.push(format!(
+                        "MAX_DURATION={v} is <= 0; will be treated as unlimited"
+                    ));
+                }
+            }
+        }
+
+        // FLAT_PANEL=yes conflicts with SCANLINES_ON=yes (scanlines are silently
+        // suppressed) and with CRT_CURVATURE > 0 (curvature has no visible
+        // effect on flat-panel output).
+        if self.yes("FLAT_PANEL") {
+            if self.yes("SCANLINES_ON") {
+                w.push(
+                    "FLAT_PANEL=yes and SCANLINES_ON=yes: scanlines are disabled \
+                     for flat-panel mode"
+                        .to_string(),
+                );
+            }
+            let curv = self.f64_or("CRT_CURVATURE", 0.0);
+            if curv > 0.0 {
+                w.push(format!(
+                    "FLAT_PANEL=yes and CRT_CURVATURE={curv}: curvature has no \
+                     effect in flat-panel mode"
                 ));
             }
         }

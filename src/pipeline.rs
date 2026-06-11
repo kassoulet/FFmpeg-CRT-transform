@@ -170,14 +170,21 @@ fn process_one_frame(ctx: &Ctx, img: ImgF32, layers: &Layers) -> Result<ImgF32> 
 /// `progress` is an optional callback called with a short stage name before
 /// each major stage begins (e.g. `"bezel"`, `"step01"`, `"output"`). Pass
 /// `None` for no-op, or `Some(&|s| eprintln!("[{s}]"))` for simple logging.
+///
+/// `overrides`: key-value pairs applied on top of the config file (e.g. from
+/// `--set` on the CLI).  Pass `&[]` for none.
 pub fn run(
     cfg_path: &Path,
     input_path: &Path,
     output_path: &Path,
     dump: Option<PathBuf>,
     progress: Option<&dyn Fn(&str)>,
+    overrides: &[(String, String)],
 ) -> Result<()> {
-    let cfg = Config::load(cfg_path)?;
+    let mut cfg = Config::load(cfg_path)?;
+    for (k, v) in overrides {
+        cfg.set(k, v);
+    }
     for warning in cfg.validate() {
         eprintln!("crt-transform: warning: {warning}");
     }
@@ -209,14 +216,20 @@ pub fn run(
 /// LATENCY (tmix) and P_DECAY (lagfun) temporal effects are applied to the
 /// processed output of each frame before writing, matching the ffcrt.sh
 /// filter graph order.
+///
+/// `overrides`: key-value pairs applied on top of the config file.
 pub fn run_video(
     cfg_path: &Path,
     input_path: &Path,
     output_path: &Path,
     dump: Option<PathBuf>,
     progress: Option<&dyn Fn(&str)>,
+    overrides: &[(String, String)],
 ) -> Result<()> {
-    let cfg = Config::load(cfg_path)?;
+    let mut cfg = Config::load(cfg_path)?;
+    for (k, v) in overrides {
+        cfg.set(k, v);
+    }
     for warning in cfg.validate() {
         eprintln!("crt-transform: warning: {warning}");
     }
@@ -263,10 +276,27 @@ fn run_video_inner(
     };
     let crf = ctx.cfg.i64_or("VIDEO_CRF", 14).clamp(0, 51) as u32;
     let source = crate::video::FfmpegFrameSource::open_with_info(input_path, &info, max_duration)?;
-    let mut sink =
-        FfmpegFrameSink::create(output_path, out_w, out_h, info.fps_num, info.fps_den, crf)?;
+    let mut sink = FfmpegFrameSink::create(
+        output_path,
+        out_w,
+        out_h,
+        info.fps_num,
+        info.fps_den,
+        crf,
+        Some(input_path),
+    )?;
+
+    let total_frames: Option<u64> = max_duration
+        .map(|d| (d * info.fps()) as u64)
+        .or(info.nb_frames);
+    let mut frame_idx: u64 = 0;
 
     for frame_result in source {
+        frame_idx += 1;
+        match total_frames {
+            Some(n) => ctx.progress(&format!("frame {frame_idx}/{n}")),
+            None => ctx.progress(&format!("frame {frame_idx}")),
+        }
         let mut frame = frame_result?;
         if invert {
             generate::negate(&mut frame);

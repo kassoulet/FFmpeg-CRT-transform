@@ -11,6 +11,12 @@ use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+fn parse_set_override(s: &str) -> Result<(String, String), String> {
+    s.split_once('=')
+        .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+        .ok_or_else(|| format!("expected KEY=VALUE, got {s:?}"))
+}
+
 /// CRT Transform — native Rust port (VileR 2021, ported 2026).
 #[derive(Parser)]
 #[command(name = "crt-transform", about, long_about = None)]
@@ -32,6 +38,10 @@ struct Cli {
     /// parallel (one rayon thread per image).
     #[arg(long, num_args = 2, value_names = ["INPUT_DIR", "OUTPUT_DIR"])]
     batch: Option<Vec<PathBuf>>,
+    /// Override a config value on the command line (repeatable).
+    /// Example: --set BRIGHTEN=2.5 --set VIDEO_CRF=10
+    #[arg(long = "set", value_name = "KEY=VALUE", value_parser = parse_set_override)]
+    set: Vec<(String, String)>,
 }
 
 const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp"];
@@ -148,7 +158,7 @@ fn cmd_batch(cfg_path: &Path, input_dir: &Path, output_dir: &Path) -> Result<()>
         let out_name = format!("{in_stem}_{cfg_stem}.{ext}");
         let output = output_dir.join(&out_name);
 
-        match pipeline::run(cfg_path, input, &output, None, None) {
+        match pipeline::run(cfg_path, input, &output, None, None, &[]) {
             Ok(()) => {
                 eprintln!(
                     "  ok  {}",
@@ -216,8 +226,10 @@ fn main() -> Result<()> {
         &input_file,
         &output,
         cli.dump_stages,
-        Some(&|stage| eprintln!("[{stage}]")),
+        Some(&|stage| eprint!("\r[{stage}]          ")),
+        &cli.set,
     )?;
+    eprintln!();
     eprintln!("Done: {}", output.display());
     Ok(())
 }

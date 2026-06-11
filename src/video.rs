@@ -49,6 +49,9 @@ pub struct VideoInfo {
     pub fps_num: u32,
     /// Denominator of the frame-rate rational.
     pub fps_den: u32,
+    /// Total frame count if the container reports it; `None` for formats that
+    /// don't store this (e.g. some ZMBV/AVI files).
+    pub nb_frames: Option<u64>,
 }
 
 impl VideoInfo {
@@ -58,8 +61,12 @@ impl VideoInfo {
     }
 }
 
-/// Query width, height, and frame-rate from a video file using `ffprobe`.
+/// Query width, height, frame-rate, and frame count from a video file.
 pub fn probe_video(path: &Path) -> Result<VideoInfo> {
+    // Two separate show_entries sections so ffprobe emits both stream-level
+    // and format-level fields.  Output lines:
+    //   WIDTH,HEIGHT,NUM/DEN,NB_FRAMES   (stream)
+    //   DURATION                          (format)
     let out = Command::new("ffprobe")
         .args([
             "-v",
@@ -67,7 +74,7 @@ pub fn probe_video(path: &Path) -> Result<VideoInfo> {
             "-select_streams",
             "v:0",
             "-show_entries",
-            "stream=width,height,r_frame_rate",
+            "stream=width,height,r_frame_rate,nb_frames:format=duration",
             "-of",
             "csv=p=0",
             path.to_str().context("non-UTF-8 path")?,
@@ -82,21 +89,52 @@ pub fn probe_video(path: &Path) -> Result<VideoInfo> {
     );
 
     let text = String::from_utf8(out.stdout).context("ffprobe output not UTF-8")?;
-    let text = text.trim();
-    // Expected format: "WIDTH,HEIGHT,NUM/DEN"
-    let mut parts = text.splitn(3, ',');
+    // First non-empty line is the video stream; last non-empty line is the
+    // format duration.  Skip audio-only stream lines (no width field).
+    let mut stream_line = None;
+    let mut duration_secs: Option<f64> = None;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with(|c: char| c.is_ascii_digit()) {
+            // Could be a stream line (W,H,...) or a duration line (just a float).
+            if line.contains(',') {
+                stream_line = Some(line);
+            } else if let Ok(d) = line.parse::<f64>() {
+                duration_secs = Some(d);
+            }
+        }
+    }
+
+    let line = stream_line.context("ffprobe: no video stream found")?;
+    let mut parts = line.splitn(4, ',');
     let w: usize = parts.next().context("missing width")?.parse()?;
     let h: usize = parts.next().context("missing height")?.parse()?;
     let fps_str = parts.next().context("missing frame rate")?;
+    let nb_str = parts.next().unwrap_or("N/A").trim();
+
     let mut fps_parts = fps_str.splitn(2, '/');
     let fps_num: u32 = fps_parts.next().context("missing fps numerator")?.parse()?;
     let fps_den: u32 = fps_parts.next().unwrap_or("1").trim().parse().unwrap_or(1);
+
+    // Prefer the container's nb_frames; fall back to duration × fps.
+    let nb_frames = nb_str
+        .parse::<u64>()
+        .ok()
+        .or_else(|| {
+            let fps = fps_num as f64 / fps_den as f64;
+            duration_secs.map(|d| (d * fps).round() as u64)
+        })
+        .filter(|&n| n > 0);
 
     Ok(VideoInfo {
         w,
         h,
         fps_num,
         fps_den,
+        nb_frames,
     })
 }
 
@@ -134,6 +172,7 @@ impl FfmpegFrameSource {
         duration_secs: Option<f64>,
     ) -> Result<Self> {
         let mut cmd = Command::new("ffmpeg");
+        cmd.args(["-loglevel", "error"]);
         if let Some(dur) = duration_secs {
             cmd.arg("-t").arg(dur.to_string());
         }
@@ -142,7 +181,7 @@ impl FfmpegFrameSource {
             .args(["-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
         let mut child = cmd
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::inherit())
             .spawn()
             .context("ffmpeg not found — is ffmpeg installed?")?;
 
@@ -182,7 +221,14 @@ impl Iterator for FfmpegFrameSource {
             }
             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                 self.done = true;
-                None
+                // If ffmpeg exited with an error, surface it rather than
+                // treating the truncated stream as a clean end-of-file.
+                match self.child.try_wait() {
+                    Ok(Some(status)) if !status.success() => {
+                        Some(Err(anyhow::anyhow!("ffmpeg decoder exited with {status}")))
+                    }
+                    _ => None,
+                }
             }
             Err(e) => {
                 self.done = true;
@@ -227,6 +273,9 @@ impl FfmpegFrameSink {
     /// lossless, 23 = default).  Output is always `yuv444p` (no chroma
     /// subsampling) with the `high444` profile.
     ///
+    /// `audio_source`: if `Some`, the original input file is added as a second
+    /// input and its audio stream is copied into the output (`-c:a copy`).
+    ///
     /// [`write`]: FrameSink::write
     pub fn create(
         path: &Path,
@@ -235,6 +284,7 @@ impl FfmpegFrameSink {
         fps_num: u32,
         fps_den: u32,
         crf: u32,
+        audio_source: Option<&Path>,
     ) -> Result<Self> {
         let fps_str = if fps_den == 1 {
             fps_num.to_string()
@@ -243,34 +293,46 @@ impl FfmpegFrameSink {
         };
         let size_str = format!("{w}x{h}");
         let crf_str = crf.to_string();
+        let out_str = path.to_str().context("non-UTF-8 output path")?;
 
-        let mut child = Command::new("ffmpeg")
-            .args([
-                "-y",
-                "-f",
-                "rawvideo",
-                "-pix_fmt",
-                "rgba",
-                "-video_size",
-                &size_str,
-                "-framerate",
-                &fps_str,
-                "-i",
-                "pipe:0",
-                "-c:v",
-                "libx264",
-                "-profile:v",
-                "high444",
-                "-crf",
-                &crf_str,
-                "-preset",
-                "slow",
-                "-pix_fmt",
-                "yuv444p",
-                path.to_str().context("non-UTF-8 path")?,
-            ])
+        let mut cmd = Command::new("ffmpeg");
+        cmd.args(["-loglevel", "error", "-y"]);
+        // Raw RGBA video from the processing pipeline (stdin pipe).
+        cmd.args([
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgba",
+            "-video_size",
+            &size_str,
+            "-framerate",
+            &fps_str,
+            "-i",
+            "pipe:0",
+        ]);
+        // Optional second input for audio passthrough.
+        if let Some(src) = audio_source {
+            cmd.arg("-i")
+                .arg(src.to_str().context("non-UTF-8 audio source path")?);
+            cmd.args(["-map", "0:v", "-map", "1:a?", "-c:a", "copy"]);
+        }
+        cmd.args([
+            "-c:v",
+            "libx264",
+            "-profile:v",
+            "high444",
+            "-crf",
+            &crf_str,
+            "-preset",
+            "slow",
+            "-pix_fmt",
+            "yuv444p",
+            out_str,
+        ]);
+
+        let mut child = cmd
             .stdin(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::inherit())
             .spawn()
             .context("ffmpeg not found — is ffmpeg installed?")?;
 
@@ -661,7 +723,7 @@ mod tests {
         // Write.
         {
             let mut sink =
-                crate::video::FfmpegFrameSink::create(&tmp_path, w, h, fps_num, fps_den, 0)
+                crate::video::FfmpegFrameSink::create(&tmp_path, w, h, fps_num, fps_den, 0, None)
                     .expect("create sink");
             for f in &frames {
                 sink.write(f).expect("write frame");
