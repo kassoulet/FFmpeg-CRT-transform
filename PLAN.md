@@ -73,6 +73,74 @@ Phase B requires three independent components that can be built in order:
 
 ---
 
+## Phase D — Video quality & DX (from code review 2026-06-11)
+
+### D1 · Audio passthrough (HIGH)
+`ffcrt.sh` passes `-c:a copy` at every video stage (lines 76, 80, 85, 88).  The
+Rust sink has no audio input: the decoded rawvideo pipe carries only video, and
+`FfmpegFrameSink` encodes with no audio track.  Any input with audio loses it.
+
+**Fix:** add a passthrough mux step in `FfmpegFrameSink::create`: open the
+original input file as a second input (`-i <src>`), map its audio stream
+(`-map 1:a? -c:a copy`), and write both to the output container.  Only the
+video stream comes from the rawvideo pipe.
+
+### D2 · Temporal effects applied post-pipeline instead of pre-step01 (MEDIUM)
+`ffcrt.sh:413,424` applies `tmix`/`lagfun` **before** step01 (on the prescaled
+input).  `run_video_inner` applies `TemporalMixer` **after** the full CRT
+pipeline.  This means decay trails have scanline/mask/bloom texture baked in,
+which differs from the reference.  Related to C5 (p7 dual-lagfun).
+
+**Fix:** move `mixer.mix()` call to before `process_one_frame`, operating on the
+raw pre-processed frame.  Requires hoisting `build_layers` to not depend on the
+frame being mixed.
+
+### D3 · ffmpeg stderr suppressed — errors are silent (MEDIUM)
+Both `FfmpegFrameSource` and `FfmpegFrameSink` use `Stdio::null()` for stderr.
+When ffmpeg fails the user sees "ffmpeg exited with exit status: 1" with no
+context.  On long renders, mid-run encoder failures also give no indication.
+
+**Fix:** pipe ffmpeg stderr to a `BufReader`, capture the last ~20 lines in a
+`VecDeque`, and include them in the error message via `.context(...)`.
+
+### D4 · No per-frame progress for video (MEDIUM)
+Video renders run silently for minutes.  `probe_video` already fetches fps;
+frame count can be derived from duration (`-show_entries format=duration`).
+
+**Fix:** extend `probe_video` to return `total_frames: Option<u64>` and call
+`ctx.progress(&format!("frame {n}/{total}"))` in the video loop.
+
+### D5 · Decoder EOF indistinguishable from crash (MEDIUM)
+`read_exact` returning `UnexpectedEof` is treated as clean end-of-stream even if
+ffmpeg died mid-file.  A truncated input silently produces fewer output frames.
+
+**Fix:** on `UnexpectedEof`, call `child.try_wait()` before returning `None`; if
+the exit code is non-zero, return `Some(Err(...))` with the exit status.
+
+### D6 · CLI config key override `--set KEY=VALUE` (MEDIUM — DX)
+Iterating on quality settings (VIDEO_CRF, BRIGHTEN, etc.) requires editing .cfg
+files.  A repeatable `--set` flag would let the workflow stay in the shell.
+
+**Fix:** add `#[arg(long = "set", value_name = "KEY=VALUE")]` to the CLI struct,
+parse into a `Vec<(String, String)>` and apply overrides after `Config::load`.
+
+### D7 · `MAX_DURATION` / `VIDEO_CRF` absent from `Config::validate()` (LOW)
+Both keys added in d7510c4 have no validation rules.  Negative `MAX_DURATION`
+silently means "unlimited"; `VIDEO_CRF > 51` silently clamps via `.clamp(0,51)`.
+
+**Fix:** add two entries to `validate()`:
+- `VIDEO_CRF` must be in [0, 51]
+- `MAX_DURATION` must be > 0 if present
+
+### D8 · `validate()` missing conflict warnings (LOW)
+`FLAT_PANEL=yes` + `SCANLINES_ON=yes`: scanlines are silently suppressed (no-op
+path in pipeline). `FLAT_PANEL=yes` + `CRT_CURVATURE > 0`: curvature is applied
+but has no visible effect on a flat-panel simulation.
+
+**Fix:** add two new warnings to `Config::validate()`.
+
+---
+
 ## Out of scope (won't implement)
 
 - Native H.264 encode/decode (use ffmpeg as I/O codec instead)
