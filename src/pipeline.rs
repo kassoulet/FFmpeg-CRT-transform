@@ -230,7 +230,7 @@ fn run_video_inner(
     dump: Option<PathBuf>,
     progress: Option<&dyn Fn(&str)>,
 ) -> Result<()> {
-    use crate::video::{FfmpegFrameSink, FfmpegFrameSource, FrameSink, TemporalMixer};
+    use crate::video::{FfmpegFrameSink, FrameSink, TemporalMixer};
 
     let info = crate::video::probe_video(input_path)?;
     let ctx = make_ctx(cfg, info.w as i64, info.h as i64, dump, progress)?;
@@ -253,8 +253,18 @@ fn run_video_inner(
     let out_h = ctx.d.oy as usize;
 
     let invert = ctx.cfg.yes("INVERT_INPUT");
-    let source = FfmpegFrameSource::open(input_path)?;
-    let mut sink = FfmpegFrameSink::create(output_path, out_w, out_h, info.fps_num, info.fps_den)?;
+    let max_duration = {
+        let d = ctx.cfg.f64_or("MAX_DURATION", 0.0);
+        if d > 0.0 {
+            Some(d)
+        } else {
+            None
+        }
+    };
+    let crf = ctx.cfg.i64_or("VIDEO_CRF", 14).clamp(0, 51) as u32;
+    let source = crate::video::FfmpegFrameSource::open_with_info(input_path, &info, max_duration)?;
+    let mut sink =
+        FfmpegFrameSink::create(output_path, out_w, out_h, info.fps_num, info.fps_den, crf)?;
 
     for frame_result in source {
         let mut frame = frame_result?;

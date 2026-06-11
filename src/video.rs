@@ -122,21 +122,25 @@ impl FfmpegFrameSource {
     /// Open `path` for sequential frame decoding.
     pub fn open(path: &Path) -> Result<Self> {
         let info = probe_video(path)?;
-        Self::open_with_info(path, &info)
+        Self::open_with_info(path, &info, None)
     }
 
     /// Open with pre-probed [`VideoInfo`] (avoids a second ffprobe call).
-    pub fn open_with_info(path: &Path, info: &VideoInfo) -> Result<Self> {
-        let mut child = Command::new("ffmpeg")
-            .args([
-                "-i",
-                path.to_str().context("non-UTF-8 path")?,
-                "-f",
-                "rawvideo",
-                "-pix_fmt",
-                "rgba",
-                "pipe:1",
-            ])
+    ///
+    /// `duration_secs`: if `Some`, stop decoding after that many seconds (`-t`).
+    pub fn open_with_info(
+        path: &Path,
+        info: &VideoInfo,
+        duration_secs: Option<f64>,
+    ) -> Result<Self> {
+        let mut cmd = Command::new("ffmpeg");
+        if let Some(dur) = duration_secs {
+            cmd.arg("-t").arg(dur.to_string());
+        }
+        cmd.arg("-i")
+            .arg(path.to_str().context("non-UTF-8 path")?)
+            .args(["-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
+        let mut child = cmd
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
@@ -219,14 +223,26 @@ impl FfmpegFrameSink {
     /// Create `path` as a video file.  Frame dimensions and frame rate must
     /// match every frame passed to [`write`].
     ///
+    /// `crf`: libx264 Constant Rate Factor (0 = lossless, 14 = perceptually
+    /// lossless, 23 = default).  Output is always `yuv444p` (no chroma
+    /// subsampling) with the `high444` profile.
+    ///
     /// [`write`]: FrameSink::write
-    pub fn create(path: &Path, w: usize, h: usize, fps_num: u32, fps_den: u32) -> Result<Self> {
+    pub fn create(
+        path: &Path,
+        w: usize,
+        h: usize,
+        fps_num: u32,
+        fps_den: u32,
+        crf: u32,
+    ) -> Result<Self> {
         let fps_str = if fps_den == 1 {
             fps_num.to_string()
         } else {
             format!("{fps_num}/{fps_den}")
         };
         let size_str = format!("{w}x{h}");
+        let crf_str = crf.to_string();
 
         let mut child = Command::new("ffmpeg")
             .args([
@@ -241,6 +257,16 @@ impl FfmpegFrameSink {
                 &fps_str,
                 "-i",
                 "pipe:0",
+                "-c:v",
+                "libx264",
+                "-profile:v",
+                "high444",
+                "-crf",
+                &crf_str,
+                "-preset",
+                "slow",
+                "-pix_fmt",
+                "yuv444p",
                 path.to_str().context("non-UTF-8 path")?,
             ])
             .stdin(Stdio::piped())
@@ -634,8 +660,9 @@ mod tests {
 
         // Write.
         {
-            let mut sink = crate::video::FfmpegFrameSink::create(&tmp_path, w, h, fps_num, fps_den)
-                .expect("create sink");
+            let mut sink =
+                crate::video::FfmpegFrameSink::create(&tmp_path, w, h, fps_num, fps_den, 0)
+                    .expect("create sink");
             for f in &frames {
                 sink.write(f).expect("write frame");
             }
