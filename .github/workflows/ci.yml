@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install ffmpeg
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
 
       - name: Install Rust
         uses: actions-rust/toolchain@v1
