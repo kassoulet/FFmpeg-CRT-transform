@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 env:
   CARGO_TERM_COLOR: always
@@ -23,10 +23,12 @@ jobs:
 
       - name: Install ffmpeg
         run: |
+          curl -fsSLo /tmp/ffmpeg.tar.xz \
+            https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
           mkdir -p /tmp/ffbin
-          curl -fsSL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz |
-            tar xJ --wildcards 'ffmpeg-*-amd64-static/ffmpeg' --strip=1 -C /tmp/ffbin
-          chmod +x /tmp/ffbin/ffmpeg
+          tar xJf /tmp/ffmpeg.tar.xz \
+            --wildcards --strip=1 -C /tmp/ffbin 'ffmpeg-*-amd64-static/ffmpeg'
+          rm /tmp/ffmpeg.tar.xz
           echo "/tmp/ffbin" >> "$GITHUB_PATH"
           /tmp/ffbin/ffmpeg -version
 
