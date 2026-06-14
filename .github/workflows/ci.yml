@@ -26,10 +26,13 @@ jobs:
             https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
           mkdir -p /tmp/ffbin
           tar xJf /tmp/ffmpeg.tar.xz \
-            --wildcards --strip=1 -C /tmp/ffbin 'ffmpeg-*-amd64-static/ffmpeg'
+            --wildcards --strip=1 -C /tmp/ffbin \
+            'ffmpeg-*-amd64-static/ffmpeg' \
+            'ffmpeg-*-amd64-static/ffprobe'
           rm /tmp/ffmpeg.tar.xz
           echo "/tmp/ffbin" >> "$GITHUB_PATH"
           /tmp/ffbin/ffmpeg -version
+          /tmp/ffbin/ffprobe -version
 
       - name: Build
         run: cargo build --release
