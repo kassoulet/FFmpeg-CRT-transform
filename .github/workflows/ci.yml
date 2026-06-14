@@ -15,14 +15,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install ffmpeg
-        uses: animafps/action-install-ffmpeg@v1.0
-
       - name: Install Rust
         uses: actions-rust/toolchain@v1
         with:
           toolchain: stable
           components: clippy, rustfmt
+
+      - name: Install ffmpeg
+        run: |
+          mkdir -p /tmp/ffbin
+          curl -fsSL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz |
+            tar xJ --wildcards 'ffmpeg-*-amd64-static/ffmpeg' --strip=1 -C /tmp/ffbin
+          chmod +x /tmp/ffbin/ffmpeg
+          echo "/tmp/ffbin" >> "$GITHUB_PATH"
+          /tmp/ffbin/ffmpeg -version
 
       - name: Build
         run: cargo build --release
